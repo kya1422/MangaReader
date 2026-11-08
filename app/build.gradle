@@ -3,6 +3,23 @@ plugins { id 'com.android.application' }
 android {
     namespace 'jp.reader.manga'
     compileSdk 35
+    signingConfigs {
+        stable {
+            def keyPath = System.getenv('MANGA_KEYSTORE_PATH')
+            if (keyPath) {
+                storeFile file(keyPath)
+                storePassword System.getenv('MANGA_KEYSTORE_PASSWORD')
+                keyAlias System.getenv('MANGA_KEY_ALIAS')
+                keyPassword System.getenv('MANGA_KEYSTORE_PASSWORD')
+                storeType 'pkcs12'
+            }
+        }
+    }
+    buildTypes {
+        debug {
+            if (System.getenv('MANGA_KEYSTORE_PATH')) signingConfig signingConfigs.stable
+        }
+    }
     defaultConfig {
         applicationId 'jp.reader.manga'
         minSdk 26

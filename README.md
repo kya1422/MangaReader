@@ -32,3 +32,6 @@ BOOXなどのAndroid電子ペーパー端末向け。WebDAVのJPEG入りZIP/CBZ�
 
 ## 基本テスト
 `tests/run-jvm-tests.sh` はZIP読み込みとダウンロード保存・期限切れ・削除のJVMテストです。Android APIとWebDAVは代用品を使用し、画面・実機・実ネットワーク・証明書の検証にはなりません。GitHub Actionsでも実行します。
+
+## 固定署名の設定
+CIで継続的に上書き更新可能なAPKを作るため、リポジトリのActions secretsに `MANGA_KEYSTORE_BASE64`、`MANGA_KEYSTORE_PASSWORD`、`MANGA_KEY_ALIAS` を設定してください。これらがない場合、CIはデフォルト鍵に切り替えずに失敗します。キーストアと鍵は同一パスワードとしています。署名鍵とパスワードは公開せず、安全にバックアップしてください。鍵を紛失すると既存のアプリを上書き更新できません。すでに別の鍵で署名したAPKからの最初の移行にはアンインストールが必要で、アプリデータも消えます。Pull request元でSecretsが使えない場合は署名ステップが失敗します。

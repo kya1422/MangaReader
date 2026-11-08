@@ -28,7 +28,23 @@ jobs:
           gradle-version: '8.11.1'
       - name: Run JVM smoke tests
         run: ./tests/run-jvm-tests.sh
-      - name: Build debug APK
+      - name: Prepare stable signing key
+        env:
+          KEYSTORE_BASE64: ${{ secrets.MANGA_KEYSTORE_BASE64 }}
+          KEYSTORE_PASSWORD: ${{ secrets.MANGA_KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.MANGA_KEY_ALIAS }}
+        run: |
+          if [ -z "$KEYSTORE_BASE64" ] || [ -z "$KEYSTORE_PASSWORD" ] || [ -z "$KEY_ALIAS" ]; then
+            echo "Signing secrets are missing. Configure MANGA_KEYSTORE_BASE64, MANGA_KEYSTORE_PASSWORD and MANGA_KEY_ALIAS in repository Actions secrets."
+            exit 1
+          fi
+          umask 077
+          printf '%s' "$KEYSTORE_BASE64" | base64 --decode > "$RUNNER_TEMP/manga-signing.p12"
+      - name: Build debug APK with stable signature
+        env:
+          MANGA_KEYSTORE_PATH: ${{ runner.temp }}/manga-signing.p12
+          MANGA_KEYSTORE_PASSWORD: ${{ secrets.MANGA_KEYSTORE_PASSWORD }}
+          MANGA_KEY_ALIAS: ${{ secrets.MANGA_KEY_ALIAS }}
         run: gradle --no-daemon :app:assembleDebug
       - name: Upload APK
         uses: actions/upload-artifact@v4
@@ -37,3 +53,6 @@ jobs:
           path: app/build/outputs/apk/debug/*.apk
           if-no-files-found: error
           retention-days: 30
+      - name: Remove temporary signing key
+        if: always()
+        run: rm -f "$RUNNER_TEMP/manga-signing.p12"
