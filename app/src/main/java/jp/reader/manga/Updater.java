@@ -29,7 +29,7 @@ final class Updater {
   static long version(PackageInfo p){return Build.VERSION.SDK_INT>=28?p.getLongVersionCode():p.versionCode;}
   static Signature[] signatures(PackageInfo p){return Build.VERSION.SDK_INT>=28?(p.signingInfo==null?null:p.signingInfo.getApkContentsSigners()):p.signatures;}
   static File download(Context ctx,Release release) throws Exception {
-    File dir=new File(ctx.getCacheDir(),"update");if(!dir.isDirectory()&&!dir.mkdirs())throw new IOException("保存場所を作成できません");File tmp=new File(dir,"download.tmp"),out=UpdateProvider.file(ctx);tmp.delete();
+    File dir=new File(ctx.getCacheDir(),"update");if(!dir.isDirectory()&&!dir.mkdirs())throw new IOException("保存場所を作成できません");File tmp=new File(dir,"download.tmp.apk"),out=UpdateProvider.file(ctx);tmp.delete();
     try {
       try(Response r=client().newCall(request(release.url)).execute()){
         if(!r.isSuccessful()||r.body()==null)throw new IOException("APK取得失敗 (HTTP "+r.code()+")");long length=r.body().contentLength();if(length>LIMIT)throw new IOException("APKが大きすぎます");
