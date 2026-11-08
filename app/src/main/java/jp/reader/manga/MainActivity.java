@@ -15,7 +15,20 @@ public class MainActivity extends Activity {
   android.content.SharedPreferences prefs; ExecutorService worker=Executors.newSingleThreadExecutor(); Handler ui=new Handler(Looper.getMainLooper()); int generation=0; LinearLayout root; Dav dav; RemoteZip zip; String bookUrl,bookName,folderUrl,folderName; int page=0,next=0; boolean reading=false; HashMap<Integer,Integer> previous=new HashMap<>(); TreeSet<Integer> cuts=new TreeSet<>(); Bitmap right,left; String alias=""; String downloadState=""; TextView downloadLabel;
   interface Task<T>{T run() throws Exception;} interface Done<T>{void accept(T x) throws Exception;}
   public void onCreate(Bundle b){super.onCreate(b);prefs=getSharedPreferences("reader",MODE_PRIVATE);alias=prefs.getString("alias","");DownloadCache.cleanup(this);home();}
-  void clear(){ generation++; root=new LinearLayout(this);root.setOrientation(1);root.setBackgroundColor(0xfffafafa);setContentView(root); }
+  void clear(){
+    generation++;
+    root=new LinearLayout(this);
+    root.setOrientation(1);
+    root.setBackgroundColor(0xfffafafa);
+    // Android 15+ may draw edge-to-edge. Keep buttons out of system gesture/status/navigation areas.
+    root.setOnApplyWindowInsetsListener((view,insets)->{
+      view.setPadding(insets.getSystemWindowInsetLeft(),insets.getSystemWindowInsetTop(),
+          insets.getSystemWindowInsetRight(),insets.getSystemWindowInsetBottom());
+      return insets;
+    });
+    setContentView(root);
+    root.requestApplyInsets();
+  }
   TextView text(String s,int size){TextView v=new TextView(this);v.setText(s);v.setTextSize(size);v.setTextColor(0xff111111);v.setPadding(16,12,16,12);return v;}
   Button button(String s,Runnable r){Button b=new Button(this);b.setText(s);b.setAllCaps(false);b.setOnClickListener(v->r.run());return b;}
   LinearLayout scroll(){ScrollView sv=new ScrollView(this);LinearLayout l=new LinearLayout(this);l.setOrientation(1);sv.addView(l);root.addView(sv,new LinearLayout.LayoutParams(-1,0,1));return l;}
