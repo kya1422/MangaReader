@@ -59,6 +59,8 @@ final class Dav {
   }
   static class Range {byte[] data;long total;Range(byte[] d,long t){data=d;total=t;}}
   Range range(String u,long start,long end) throws Exception {
+    File cached=DownloadCache.available(ctx,u);
+    if(cached!=null){try(RandomAccessFile f=new RandomAccessFile(cached,"r")){long total=f.length();long first=start<0?Math.max(0,total-end):start;long last=start<0?total-1:Math.min(end,total-1);if(first<0||last<first||last-first+1>33L*1024*1024)throw new IOException("保存ファイルの範囲が不正です");byte[] bytes=new byte[(int)(last-first+1)];f.seek(first);f.readFully(bytes);return new Range(bytes,total);}catch(FileNotFoundException ignored){/* deleted concurrently: use network */}}
     HttpURLConnection c=open(u,"GET");c.setRequestProperty("Range",start<0?"bytes=-"+end:"bytes="+start+"-"+end);
     try {int code=c.getResponseCode();if(code!=206)throw new IOException("部分取得に非対応です（HTTP "+code+"）。WebDAVとCloudflareのRange設定を確認してください。");
       String cr=c.getHeaderField("Content-Range");if(cr==null||!cr.matches("bytes \\d+-\\d+/\\d+"))throw new IOException("Content-Rangeが不正です");String[] p=cr.substring(6).split("[-/]");long first=Long.parseLong(p[0]),last=Long.parseLong(p[1]),total=Long.parseLong(p[2]);long expectedStart=start<0?Math.max(0,total-end):start; long expectedEnd=start<0?total-1:Math.min(end,total-1);

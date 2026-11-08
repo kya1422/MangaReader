@@ -1,0 +1,3 @@
+package android.graphics;
+import java.io.*;import javax.imageio.ImageIO;import java.awt.image.BufferedImage;
+public class BitmapFactory { public static class Options { public boolean inJustDecodeBounds; public int outWidth,outHeight,inSampleSize; public Bitmap.Config inPreferredConfig; } public static Bitmap decodeByteArray(byte[] bytes,int off,int len,Options o){try{BufferedImage img=ImageIO.read(new ByteArrayInputStream(bytes,off,len));if(img==null)return null;o.outWidth=img.getWidth();o.outHeight=img.getHeight();if(o.inJustDecodeBounds)return null;return new Bitmap(o.outWidth/o.inSampleSize,o.outHeight/o.inSampleSize);}catch(IOException e){return null;}} }
