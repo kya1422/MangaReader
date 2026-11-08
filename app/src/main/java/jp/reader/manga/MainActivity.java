@@ -88,8 +88,9 @@ public class MainActivity extends Activity {
     int first=Math.max(0,index-10), last=Math.min(current.pages.size()-1,index+10);
     int density=(int)(getResources().getDisplayMetrics().density*100);
     int cardWidth=Math.max(1,80*density/100), imageHeight=Math.max(1,105*density/100);
-    ArrayList<ImageView> views=new ArrayList<>();
-    for(int i=first;i<=last;i++){
+    ArrayList<ImageView> views=new ArrayList<>(Collections.nCopies(last-first+1, null));
+    // Manga order: earlier pages on the right, later pages on the left.
+    for(int i=last;i>=first;i--){
       final int target=i;
       LinearLayout card=new LinearLayout(this);card.setOrientation(1);card.setGravity(Gravity.CENTER);
       card.setBackgroundColor(i==index?0xffc8c8c8:0xffeeeeee);
@@ -98,10 +99,10 @@ public class MainActivity extends Activity {
       card.addView(image,new LinearLayout.LayoutParams(cardWidth,imageHeight));
       TextView number=text(String.valueOf(i+1),12);number.setGravity(Gravity.CENTER);number.setPadding(2,2,2,2);card.addView(number);
       LinearLayout.LayoutParams cardParams=new LinearLayout.LayoutParams(cardWidth,-2);cardParams.setMargins(2,2,2,2);strip.addView(card,cardParams);
-      views.add(image);thumbnailViews.add(image);
+      views.set(i-first,image);thumbnailViews.add(image);
       card.setOnClickListener(v->{previous.clear();page=target;next=0;controlsVisible=false;render();});
     }
-    scroller.post(()->{if(serial==previewSerial && generation==currentGeneration){int center=(index-first)*(cardWidth+4)+cardWidth/2;scroller.scrollTo(Math.max(0,center-scroller.getWidth()/2),0);}});
+    scroller.post(()->{if(serial==previewSerial && generation==currentGeneration){int center=(last-index)*(cardWidth+4)+cardWidth/2;scroller.scrollTo(Math.max(0,center-scroller.getWidth()/2),0);}});
     // Debounce changes, load nearest pages first, and never block the main page worker.
     previewPending=()->{
       ArrayList<Integer> order=new ArrayList<>();
