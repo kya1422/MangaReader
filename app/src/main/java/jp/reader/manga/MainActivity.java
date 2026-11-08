@@ -16,7 +16,7 @@ import java.util.*;
 import java.util.concurrent.*;
 
 public class MainActivity extends Activity {
-  android.content.SharedPreferences prefs; ExecutorService worker=Executors.newSingleThreadExecutor(); Handler ui=new Handler(Looper.getMainLooper()); volatile int generation=0; LinearLayout root; Dav dav; RemoteZip zip; String bookUrl,bookName,folderUrl,folderName; int page=0,next=0; boolean reading=false; HashMap<Integer,Integer> previous=new HashMap<>(); TreeSet<Integer> cuts=new TreeSet<>(); Bitmap right,left; String alias=""; String downloadState=""; TextView downloadLabel; boolean controlsVisible=false; boolean leftToRightSpread=false; final ExecutorService thumbWorker=Executors.newSingleThreadExecutor(); final ArrayList<ImageView> thumbnailViews=new ArrayList<>(); final ArrayList<Bitmap> thumbnailBitmaps=new ArrayList<>(); volatile int previewSerial=0; Runnable previewPending;
+  android.content.SharedPreferences prefs; ExecutorService worker=Executors.newSingleThreadExecutor(); Handler ui=new Handler(Looper.getMainLooper()); volatile int generation=0; LinearLayout root; Dav dav; RemoteZip zip; String bookUrl,bookName,folderUrl,folderName; int page=0,next=0; boolean reading=false; HashMap<Integer,Integer> previous=new HashMap<>(); TreeSet<Integer> cuts=new TreeSet<>(); Bitmap right,left; String alias=""; String downloadState=""; TextView downloadLabel; boolean controlsVisible=false; boolean leftToRightSpread=false; final ExecutorService thumbWorker=Executors.newSingleThreadExecutor(); final ArrayList<ImageView> thumbnailViews=new ArrayList<>(); final ArrayList<Bitmap> thumbnailBitmaps=new ArrayList<>(); volatile int previewSerial=0; Runnable previewPending; final ExecutorService prefetchWorker=Executors.newSingleThreadExecutor(); boolean prefetchRequested=false; String prefetchStatus=""; TextView prefetchLabel;
   interface Task<T>{T run() throws Exception;} interface Done<T>{void accept(T x) throws Exception;}
   public void onCreate(Bundle b){super.onCreate(b);prefs=getSharedPreferences("reader",MODE_PRIVATE);alias=prefs.getString("alias","");DownloadCache.cleanup(this);home();}
   void clear(){
@@ -81,7 +81,7 @@ public class MainActivity extends Activity {
     list.addView(button("並び替え: "+sort,()->new AlertDialog.Builder(this).setTitle("並び替え").setItems(new String[]{"最近読んだ順","タイトル順","著者順"},(d,n)->{prefs.edit().putString("sort",new String[]{"最近読んだ順","タイトル順","著者順"}[n]).apply();home();}).show()));
     for(JSONObject o:series){String fn=o.optString("folderName"),fu=o.optString("folder"),bn=o.optString("name");TextView v=entry(clean(fn),author(fn)+"\n"+clean(bn)+"  途中 "+(o.optInt("page")+1)+" / "+o.optInt("total"));list.addView(v);v.setOnClickListener(w->browse(fu,fn));}
   }
-  void settings(){clear();root.addView(button("← ホーム",this::home));root.addView(text("WebDAV接続設定",23));LinearLayout l=scroll();EditText u=new EditText(this),n=new EditText(this),p=new EditText(this);u.setHint("https://example.com/webdav/");u.setSingleLine();u.setText(prefs.getString("url",""));n.setHint("ユーザー名（必要な場合）");n.setText(prefs.getString("user",""));p.setHint("パスワード（端末内に保存）");p.setInputType(129);try{p.setText(PasswordStore.read(prefs));}catch(Exception e){message("保存したパスワードを読み込めません。再入力して保存してください。");}l.addView(u);l.addView(n);l.addView(p);TextView cert=text("証明書: "+(alias.isEmpty()?"未選択":alias),15);l.addView(cert);l.addView(button("証明書をインストール",()->{try{startActivityForResult(KeyChain.createInstallIntent(),102);}catch(Exception e){message("証明書インストール画面を開けません: "+e.getMessage());}}));l.addView(button("インストール済み証明書を選択",()->{try{KeyChain.choosePrivateKeyAlias(this,a->ui.post(()->{if(a!=null){alias=a;cert.setText("証明書: "+a);}else message("証明書が選択されませんでした。端末にクライアント証明書をインストールしてください。");}),null,null,null,-1,alias.isEmpty()?null:alias);}catch(Exception e){message("証明書選択画面を開けません: "+e.getMessage());}}));l.addView(button("証明書を解除",()->{alias="";cert.setText("証明書: 未選択");}));l.addView(text("PKCS#12（.p12/.pfx）を端末にインストール後、インストール済み証明書を選択し、最後に保存を押してください。WebDAVパスワードはAndroid Keystoreの鍵で暗号化して保存します。",14));l.addView(button("アプリの更新を確認",this::checkUpdate));l.addView(button("保存",()->{String url=u.getText().toString().trim();if(!url.startsWith("https://")){message("HTTPSのURLを入力してください");return;}if(!url.endsWith("/"))url+="/";try{PasswordStore.write(prefs,p.getText().toString());}catch(Exception e){message("パスワードを安全に保存できませんでした。設定は保存されていません。");return;}prefs.edit().putString("url",url).putString("user",n.getText().toString()).putString("alias",alias).apply();home();}));}
+  void settings(){clear();root.addView(button("← ホーム",this::home));root.addView(text("WebDAV接続設定",23));LinearLayout l=scroll();EditText u=new EditText(this),n=new EditText(this),p=new EditText(this);u.setHint("https://example.com/webdav/");u.setSingleLine();u.setText(prefs.getString("url",""));n.setHint("ユーザー名（必要な場合）");n.setText(prefs.getString("user",""));p.setHint("パスワード（端末内に保存）");p.setInputType(129);try{p.setText(PasswordStore.read(prefs));}catch(Exception e){message("保存したパスワードを読み込めません。再入力して保存してください。");}l.addView(u);l.addView(n);l.addView(p);TextView cert=text("証明書: "+(alias.isEmpty()?"未選択":alias),15);l.addView(cert);l.addView(button("証明書をインストール",()->{try{startActivityForResult(KeyChain.createInstallIntent(),102);}catch(Exception e){message("証明書インストール画面を開けません: "+e.getMessage());}}));l.addView(button("インストール済み証明書を選択",()->{try{KeyChain.choosePrivateKeyAlias(this,a->ui.post(()->{if(a!=null){alias=a;cert.setText("証明書: "+a);}else message("証明書が選択されませんでした。端末にクライアント証明書をインストールしてください。");}),null,null,null,-1,alias.isEmpty()?null:alias);}catch(Exception e){message("証明書選択画面を開けません: "+e.getMessage());}}));l.addView(button("証明書を解除",()->{alias="";cert.setText("証明書: 未選択");}));l.addView(text("PKCS#12（.p12/.pfx）を端末にインストール後、インストール済み証明書を選択し、最後に保存を押してください。WebDAVパスワードはAndroid Keystoreの鍵で暗号化して保存します。",14));CheckBox prefetch=new CheckBox(this);prefetch.setText("読み終わる前に次巻をダウンロード（90％付近）");prefetch.setChecked(prefs.getBoolean("prefetch_next",true));l.addView(prefetch);l.addView(button("アプリの更新を確認",this::checkUpdate));l.addView(button("保存",()->{String url=u.getText().toString().trim();if(!url.startsWith("https://")){message("HTTPSのURLを入力してください");return;}if(!url.endsWith("/"))url+="/";try{PasswordStore.write(prefs,p.getText().toString());}catch(Exception e){message("パスワードを安全に保存できませんでした。設定は保存されていません。");return;}prefs.edit().putString("url",url).putString("user",n.getText().toString()).putString("alias",alias).putBoolean("prefetch_next",prefetch.isChecked()).apply();home();}));}
   void checkUpdate(){
     message("GitHubの更新を確認しています…");
     async(Updater::latest,release->{
@@ -111,7 +111,7 @@ public class MainActivity extends Activity {
   }
   Dav client() throws Exception{return new Dav(this,prefs.getString("url",""),prefs.getString("user",""),PasswordStore.read(prefs),prefs.getString("alias",""));}
   void browse(String url,String name){if(url.isEmpty()){settings();return;}reading=false;clear();release();root.addView(button("← ホーム",this::home));root.addView(text(clean(name),23));LinearLayout list=scroll();TextView status=text("読み込み中…",16);list.addView(status);async(()->{Dav d=client();return d.list(url);},items->{list.removeView(status);items.sort((a,b)->a.dir!=b.dir?(a.dir?-1:1):RemoteZip.natural(a.name,b.name));for(Dav.Item item:items){JSONObject rec=record(item.url);String sub=item.dir?"フォルダ":rec.length()==0?"未読":rec.optBoolean("finished")?"既読":"途中  "+(rec.optInt("page")+1)+" / "+rec.optInt("total");TextView v=entry(clean(item.name),author(item.name)+"  "+sub);list.addView(v);v.setOnClickListener(w->{if(item.dir)browse(item.url,item.name);else openBook(item.url,item.name,url,name);});}if(items.isEmpty())list.addView(text("フォルダまたはZIPがありません",16));});}
-  void openBook(String url,String name,String folder,String fname){bookUrl=url;bookName=name;folderUrl=folder;folderName=fname;reading=true;controlsVisible=false;previous.clear();cuts.clear();JSONObject rec=record(url);leftToRightSpread=rec.optBoolean("leftToRightSpread",false);page=rec.optInt("page",0);JSONArray arr=rec.optJSONArray("cuts");if(arr!=null)for(int i=0;i<arr.length();i++)cuts.add(arr.optInt(i));clear();loadingBars();root.addView(button("← ホーム",this::home));root.addView(text("本を開いています…",20));downloadState="保存準備中";async(()->{Dav d=client();RemoteZip opened=new RemoteZip(d,url);DownloadCache.start(this,d,url,state->ui.post(()->{if(reading && url.equals(bookUrl)){downloadState=state;if(downloadLabel!=null)downloadLabel.setText("端末への保存: "+state);}}));return opened;},z->{zip=z;page=Math.max(0,Math.min(page,zip.pages.size()-1));render();});}
+  void openBook(String url,String name,String folder,String fname){bookUrl=url;bookName=name;folderUrl=folder;folderName=fname;reading=true;controlsVisible=false;prefetchRequested=false;prefetchStatus="";previous.clear();cuts.clear();JSONObject rec=record(url);leftToRightSpread=rec.optBoolean("leftToRightSpread",false);page=rec.optInt("page",0);JSONArray arr=rec.optJSONArray("cuts");if(arr!=null)for(int i=0;i<arr.length();i++)cuts.add(arr.optInt(i));clear();loadingBars();root.addView(button("← ホーム",this::home));root.addView(text("本を開いています…",20));downloadState="保存準備中";async(()->{Dav d=client();RemoteZip opened=new RemoteZip(d,url);DownloadCache.start(this,d,url,state->ui.post(()->{if(reading && url.equals(bookUrl)){downloadState=state;if(downloadLabel!=null)downloadLabel.setText("端末への保存: "+state);}}));return opened;},z->{zip=z;page=Math.max(0,Math.min(page,zip.pages.size()-1));render();});}
   void save(){if(zip==null)return;JSONObject o=record(bookUrl);try{o.put("url",bookUrl);o.put("name",bookName);o.put("folder",folderUrl);o.put("folderName",folderName);o.put("page",page);o.put("total",zip.pages.size());o.put("time",System.currentTimeMillis());o.put("finished",false);o.put("leftToRightSpread",leftToRightSpread);JSONArray a=new JSONArray();for(int cut:cuts)a.put(cut);o.put("cuts",a);put(bookUrl,o);}catch(Exception ignored){}}
   void release(){if(right!=null){right.recycle();right=null;}if(left!=null){left.recycle();left=null;}}
   static final class Spread {Bitmap a,b;int next;Spread(Bitmap x,Bitmap y,int n){a=x;b=y;next=n;}}
@@ -174,7 +174,7 @@ public class MainActivity extends Activity {
         leftToRightSpread=choice==1;save();dialog.dismiss();render();
       }).setNegativeButton("キャンセル",null).show()));
     controls.addView(bar);
-    downloadLabel=text("端末への保存: "+downloadState,12);controls.addView(downloadLabel);
+    downloadLabel=text("端末への保存: "+downloadState,12);controls.addView(downloadLabel);prefetchLabel=text(prefetchStatus,12);if(!prefetchStatus.isEmpty())controls.addView(prefetchLabel);
     TextView status=text("読み込み中…",14);controls.addView(status);
     frame.addView(controls,new FrameLayout.LayoutParams(-1,-2,Gravity.TOP));
     LinearLayout seekPanel=new LinearLayout(this);seekPanel.setOrientation(1);seekPanel.setGravity(Gravity.CENTER);seekPanel.setBackgroundColor(0xeef5f5f5);
@@ -205,7 +205,32 @@ public class MainActivity extends Activity {
           else if(e.getX()<v.getWidth()/3f)forward();else if(e.getX()>v.getWidth()*2f/3f)backPage();
           else {controlsVisible=!controlsVisible;systemBars(!controlsVisible);controls.setVisibility(controlsVisible?View.VISIBLE:View.GONE);seekPanel.setVisibility(controlsVisible?View.VISIBLE:View.GONE);if(controlsVisible)scheduleGallery(current,seek.getMax()-seek.getProgress(),strip,scroller,caption);else {clearThumbnail();strip.removeAllViews();}root.requestApplyInsets();controls.requestApplyInsets();seekPanel.requestApplyInsets();}
           return true;}return true;}});
-      save();
+      save();maybePrefetch();
+    });
+  }
+  void updatePrefetchStatus(String expectedUrl,String status){
+    ui.post(()->{
+      if(!reading || !expectedUrl.equals(bookUrl))return;
+      prefetchStatus=status;
+      if(prefetchLabel!=null){prefetchLabel.setText(status);if(prefetchLabel.getParent()==null){android.view.ViewParent parent=downloadLabel!=null?downloadLabel.getParent():null;if(parent instanceof LinearLayout)((LinearLayout)parent).addView(prefetchLabel);}}
+    });
+  }
+  void maybePrefetch(){
+    if(zip==null||prefetchRequested||!prefs.getBoolean("prefetch_next",true)||!NextBook.reachedThreshold(next,zip.pages.size()))return;
+    prefetchRequested=true;
+    final String currentUrl=bookUrl, parent=folderUrl;
+    updatePrefetchStatus(currentUrl,"次巻を確認中…");
+    prefetchWorker.execute(()->{
+      try{
+        Dav d=client();Dav.Item item=NextBook.find(d.list(parent),currentUrl);
+        if(item==null){updatePrefetchStatus(currentUrl,"次巻はありません");return;}
+        ui.post(()->{
+          // Do not start a stale prefetch after the reader has moved to another book.
+          if(!reading || !currentUrl.equals(bookUrl))return;
+          updatePrefetchStatus(currentUrl,"次巻を保存中: "+clean(item.name));
+          DownloadCache.start(getApplicationContext(),d,item.url,state->updatePrefetchStatus(currentUrl,"次巻: "+clean(item.name)+" — "+state));
+        });
+      }catch(Exception e){updatePrefetchStatus(currentUrl,"次巻の先読みを開始できませんでした");}
     });
   }
   void addPageImage(LinearLayout container,Bitmap image){
@@ -230,10 +255,10 @@ public class MainActivity extends Activity {
     try{o.put("finished",true);o.put("time",System.currentTimeMillis());put(bookUrl,o);}catch(Exception ignored){}
     DownloadCache.delete(this,finishedUrl);
     AlertDialog dialog=new AlertDialog.Builder(this).setTitle("読み終わりました").setMessage("次の巻を確認しています…").setCancelable(false).setPositiveButton("次の巻へ",null).setNegativeButton("ホームへ戻る",(d,w)->home()).create();
-    dialog.setOnShowListener(v->{Button b=dialog.getButton(AlertDialog.BUTTON_POSITIVE);b.setEnabled(false);async(()->{Dav d=client();java.util.List<Dav.Item> items=d.list(parent);items.removeIf(item->item.dir);items.sort((a,c)->RemoteZip.natural(a.name,c.name));for(int i=0;i<items.size();i++)if(items.get(i).url.equals(finishedUrl))return i+1<items.size()?items.get(i+1):null;return null;},item->{if(!dialog.isShowing())return;if(item==null){dialog.setMessage("次の巻はありません。ホームへ戻ってください。");}else{dialog.setMessage("次の巻: "+clean(item.name));b.setEnabled(true);b.setOnClickListener(w->{dialog.dismiss();openBook(item.url,item.name,parent,folderName);});}});});
+    dialog.setOnShowListener(v->{Button b=dialog.getButton(AlertDialog.BUTTON_POSITIVE);b.setEnabled(false);async(()->{Dav d=client();return NextBook.find(d.list(parent),finishedUrl);},item->{if(!dialog.isShowing())return;if(item==null){dialog.setMessage("次の巻はありません。ホームへ戻ってください。");}else{dialog.setMessage("次の巻: "+clean(item.name));b.setEnabled(true);b.setOnClickListener(w->{dialog.dismiss();openBook(item.url,item.name,parent,folderName);});}});});
     dialog.show();
   }
   void backPage(){if(zip==null||page<=0)return;Integer p=previous.get(page);if(p==null){jumpToPage(page-1);return;}page=p;next=0;controlsVisible=false;render();}
   @Override public void onBackPressed(){if(reading)home();else home();}
-  @Override protected void onDestroy(){generation++;worker.shutdownNow();thumbWorker.shutdownNow();clearThumbnail();release();super.onDestroy();}
+  @Override protected void onDestroy(){generation++;worker.shutdownNow();thumbWorker.shutdownNow();prefetchWorker.shutdownNow();clearThumbnail();release();super.onDestroy();}
 }
