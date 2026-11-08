@@ -8,3 +8,6 @@ javac -encoding UTF-8 -d "$tmp/zip" $(find tests/zip/src -name '*.java') app/src
 java -Dfile.encoding=UTF-8 -Djava.awt.headless=true -cp "$tmp/zip" jp.reader.manga.TestMain
 javac -encoding UTF-8 -d "$tmp/cache" $(find tests/cache/src -name '*.java') app/src/main/java/jp/reader/manga/DownloadCache.java
 java -Dfile.encoding=UTF-8 -cp "$tmp/cache" jp.reader.manga.Test
+mkdir -p "$tmp/spread"
+javac -encoding UTF-8 -d "$tmp/spread" tests/spread/src/jp/reader/manga/TestSpread.java app/src/main/java/jp/reader/manga/SpreadPlanner.java
+java -Dfile.encoding=UTF-8 -cp "$tmp/spread" jp.reader.manga.TestSpread

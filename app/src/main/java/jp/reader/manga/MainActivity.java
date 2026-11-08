@@ -74,7 +74,7 @@ public class MainActivity extends Activity {
     list.addView(button("並び替え: "+sort,()->new AlertDialog.Builder(this).setTitle("並び替え").setItems(new String[]{"最近読んだ順","タイトル順","著者順"},(d,n)->{prefs.edit().putString("sort",new String[]{"最近読んだ順","タイトル順","著者順"}[n]).apply();home();}).show()));
     for(JSONObject o:series){String fn=o.optString("folderName"),fu=o.optString("folder"),bn=o.optString("name");TextView v=entry(clean(fn),author(fn)+"\n"+clean(bn)+"  途中 "+(o.optInt("page")+1)+" / "+o.optInt("total"));list.addView(v);v.setOnClickListener(w->browse(fu,fn));}
   }
-  void settings(){clear();root.addView(button("← ホーム",this::home));root.addView(text("WebDAV接続設定",23));LinearLayout l=scroll();EditText u=new EditText(this),n=new EditText(this),p=new EditText(this);u.setHint("https://example.com/webdav/");u.setSingleLine();u.setText(prefs.getString("url",""));n.setHint("ユーザー名（必要な場合）");n.setText(prefs.getString("user",""));p.setHint("パスワード（端末内に保存）");p.setInputType(129);p.setText(prefs.getString("pass",""));l.addView(u);l.addView(n);l.addView(p);TextView cert=text("証明書: "+(alias.isEmpty()?"未選択":alias),15);l.addView(cert);l.addView(button("証明書を選択",()->KeyChain.choosePrivateKeyAlias(this,a->{if(a!=null){alias=a;ui.post(()->cert.setText("証明書: "+a));}},null,null,null,-1,alias.isEmpty()?null:alias)));l.addView(button("証明書を解除",()->{alias="";cert.setText("証明書: 未選択");}));l.addView(text("PKCS#12証明書は事前にAndroidの設定からインストールしてください。パスワードはアプリ専用領域に保存します。",14));l.addView(button("保存",()->{String url=u.getText().toString().trim();if(!url.startsWith("https://")){message("HTTPSのURLを入力してください");return;}if(!url.endsWith("/"))url+="/";prefs.edit().putString("url",url).putString("user",n.getText().toString()).putString("pass",p.getText().toString()).putString("alias",alias).apply();home();}));}
+  void settings(){clear();root.addView(button("← ホーム",this::home));root.addView(text("WebDAV接続設定",23));LinearLayout l=scroll();EditText u=new EditText(this),n=new EditText(this),p=new EditText(this);u.setHint("https://example.com/webdav/");u.setSingleLine();u.setText(prefs.getString("url",""));n.setHint("ユーザー名（必要な場合）");n.setText(prefs.getString("user",""));p.setHint("パスワード（端末内に保存）");p.setInputType(129);p.setText(prefs.getString("pass",""));l.addView(u);l.addView(n);l.addView(p);TextView cert=text("証明書: "+(alias.isEmpty()?"未選択":alias),15);l.addView(cert);l.addView(button("証明書をインストール",()->{try{startActivityForResult(KeyChain.createInstallIntent(),102);}catch(Exception e){message("証明書インストール画面を開けません: "+e.getMessage());}}));l.addView(button("インストール済み証明書を選択",()->{try{KeyChain.choosePrivateKeyAlias(this,a->ui.post(()->{if(a!=null){alias=a;cert.setText("証明書: "+a);}else message("証明書が選択されませんでした。端末にクライアント証明書をインストールしてください。");}),null,null,null,-1,alias.isEmpty()?null:alias);}catch(Exception e){message("証明書選択画面を開けません: "+e.getMessage());}}));l.addView(button("証明書を解除",()->{alias="";cert.setText("証明書: 未選択");}));l.addView(text("PKCS#12（.p12/.pfx）を端末にインストール後、インストール済み証明書を選択し、最後に保存を押してください。WebDAVパスワードはアプリ専用領域に保存します。",14));l.addView(button("保存",()->{String url=u.getText().toString().trim();if(!url.startsWith("https://")){message("HTTPSのURLを入力してください");return;}if(!url.endsWith("/"))url+="/";prefs.edit().putString("url",url).putString("user",n.getText().toString()).putString("pass",p.getText().toString()).putString("alias",alias).apply();home();}));}
   Dav client() throws Exception{return new Dav(this,prefs.getString("url",""),prefs.getString("user",""),prefs.getString("pass",""),prefs.getString("alias",""));}
   void browse(String url,String name){if(url.isEmpty()){settings();return;}reading=false;release();clear();root.addView(button("← ホーム",this::home));root.addView(text(clean(name),23));LinearLayout list=scroll();TextView status=text("読み込み中…",16);list.addView(status);async(()->{Dav d=client();return d.list(url);},items->{list.removeView(status);items.sort((a,b)->a.dir!=b.dir?(a.dir?-1:1):RemoteZip.natural(a.name,b.name));for(Dav.Item item:items){JSONObject rec=record(item.url);String sub=item.dir?"フォルダ":rec.length()==0?"未読":rec.optBoolean("finished")?"既読":"途中  "+(rec.optInt("page")+1)+" / "+rec.optInt("total");TextView v=entry(clean(item.name),author(item.name)+"  "+sub);list.addView(v);v.setOnClickListener(w->{if(item.dir)browse(item.url,item.name);else openBook(item.url,item.name,url,name);});}if(items.isEmpty())list.addView(text("フォルダまたはZIPがありません",16));});}
   void openBook(String url,String name,String folder,String fname){bookUrl=url;bookName=name;folderUrl=folder;folderName=fname;reading=true;controlsVisible=false;previous.clear();cuts.clear();JSONObject rec=record(url);page=rec.optInt("page",0);JSONArray arr=rec.optJSONArray("cuts");if(arr!=null)for(int i=0;i<arr.length();i++)cuts.add(arr.optInt(i));clear();root.addView(button("← ホーム",this::home));root.addView(text("本を開いています…",20));downloadState="保存準備中";async(()->{Dav d=client();RemoteZip opened=new RemoteZip(d,url);DownloadCache.start(this,d,url,state->ui.post(()->{if(reading && url.equals(bookUrl)){downloadState=state;if(downloadLabel!=null)downloadLabel.setText("端末への保存: "+state);}}));return opened;},z->{zip=z;page=Math.max(0,Math.min(page,zip.pages.size()-1));render();});}
@@ -100,7 +100,7 @@ public class MainActivity extends Activity {
       TextView number=text(String.valueOf(i+1),12);number.setGravity(Gravity.CENTER);number.setPadding(2,2,2,2);card.addView(number);
       LinearLayout.LayoutParams cardParams=new LinearLayout.LayoutParams(cardWidth,-2);cardParams.setMargins(2,2,2,2);strip.addView(card,cardParams);
       views.set(i-first,image);thumbnailViews.add(image);
-      card.setOnClickListener(v->{previous.clear();page=target;next=0;controlsVisible=false;render();});
+      card.setOnClickListener(v->jumpToPage(target));
     }
     scroller.post(()->{if(serial==previewSerial && generation==currentGeneration){int center=(last-index)*(cardWidth+4)+cardWidth/2;scroller.scrollTo(Math.max(0,center-scroller.getWidth()/2),0);}});
     // Debounce changes, load nearest pages first, and never block the main page worker.
@@ -151,11 +151,11 @@ public class MainActivity extends Activity {
     seek.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener(){
       public void onProgressChanged(SeekBar v,int progress,boolean fromUser){if(fromUser)scheduleGallery(current,progress,strip,scroller,caption);}
       public void onStartTrackingTouch(SeekBar v){}
-      public void onStopTrackingTouch(SeekBar v){int target=v.getProgress();if(target!=page){previous.clear();page=target;next=0;controlsVisible=false;render();}}
+      public void onStopTrackingTouch(SeekBar v){int target=v.getProgress();if(target!=page)jumpToPage(target);}
     });
     if(controlsVisible)scheduleGallery(current,page,strip,scroller,caption);
     int width=getResources().getDisplayMetrics().widthPixels,height=getResources().getDisplayMetrics().heightPixels;
-    async(()->{Bitmap a=current.bitmap(requested,width,height);Bitmap b=null;int n=requested+1;if(a.getWidth()<a.getHeight()&&n<current.pages.size()&&!anchors.contains(n)){try{b=current.bitmap(n,width,height);}catch(Exception e){a.recycle();throw e;}if(b.getWidth()<b.getHeight())n++;else{b.recycle();b=null;}}return new Spread(a,b,n);},s->{
+    async(()->{Bitmap a=current.bitmap(requested,width,height);Bitmap b=null;int n=requested+1;if(!current.isWide(requested)&&n<current.pages.size()&&!anchors.contains(n)){try{b=current.bitmap(n,width,height);}catch(Exception e){a.recycle();throw e;}if(!current.isWide(n))n++;else{b.recycle();b=null;}}return new Spread(a,b,n);},s->{
       release();right=s.a;left=s.b;next=s.next;status.setText((page+1)+(next>page+1?"–"+next:"")+" / "+zip.pages.size());
       if(left!=null){ImageView lv=new ImageView(this);lv.setImageBitmap(left);lv.setScaleType(ImageView.ScaleType.FIT_CENTER);images.addView(lv,new LinearLayout.LayoutParams(0,-1,1));}
       ImageView rv=new ImageView(this);rv.setImageBitmap(right);rv.setScaleType(ImageView.ScaleType.FIT_CENTER);images.addView(rv,new LinearLayout.LayoutParams(0,-1,1));
@@ -167,6 +167,18 @@ public class MainActivity extends Activity {
           return true;}return true;}});
       save();
     });
+  }
+  void jumpToPage(int target){
+    if(zip==null)return;
+    RemoteZip current=zip;TreeSet<Integer> anchors=new TreeSet<>(cuts);
+    controlsVisible=false;clear();release();
+    root.addView(button("← ホーム",this::home));
+    root.addView(text("見開きの位置を確認しています…",20));
+    final int jobGeneration=generation;
+    async(()->SpreadPlanner.containing(target,current.pages.size(),anchors,index->{
+      if(jobGeneration!=generation)throw new java.io.IOException("中断しました");
+      return current.isWide(index);
+    }),start->{previous.clear();page=start;next=0;render();});
   }
   void forward(){if(zip==null||next<=page)return;if(next>=zip.pages.size()){finishBook();return;}previous.put(next,page);page=next;next=0;controlsVisible=false;render();}
   void finishBook(){
