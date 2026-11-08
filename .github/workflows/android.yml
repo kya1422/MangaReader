@@ -3,11 +3,10 @@ name: Android APK
 on:
   push:
     branches: [main]
-  pull_request:
   workflow_dispatch:
 
 permissions:
-  contents: read
+  contents: write
 
 jobs:
   build:
@@ -40,19 +39,31 @@ jobs:
           fi
           umask 077
           printf '%s' "$KEYSTORE_BASE64" | base64 --decode > "$RUNNER_TEMP/manga-signing.p12"
-      - name: Build debug APK with stable signature
+      - name: Build release APK with stable signature
         env:
           MANGA_KEYSTORE_PATH: ${{ runner.temp }}/manga-signing.p12
           MANGA_KEYSTORE_PASSWORD: ${{ secrets.MANGA_KEYSTORE_PASSWORD }}
           MANGA_KEY_ALIAS: ${{ secrets.MANGA_KEY_ALIAS }}
-        run: gradle --no-daemon :app:assembleDebug
+        run: gradle --no-daemon :app:assembleRelease
       - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
-          name: manga-reader-debug
-          path: app/build/outputs/apk/debug/*.apk
+          name: manga-reader-release
+          path: app/build/outputs/apk/release/*.apk
           if-no-files-found: error
           retention-days: 30
+      - name: Publish signed APK to GitHub Releases
+        if: github.ref == 'refs/heads/main' && (github.event_name == 'push' || github.event_name == 'workflow_dispatch')
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          cp app/build/outputs/apk/release/app-release.apk "$RUNNER_TEMP/MangaReader.apk"
+          tag="build-${GITHUB_RUN_NUMBER}"
+          if gh release view "$tag" >/dev/null 2>&1; then
+            gh release upload "$tag" "$RUNNER_TEMP/MangaReader.apk" --clobber
+          else
+            gh release create "$tag" "$RUNNER_TEMP/MangaReader.apk" --target "$GITHUB_SHA" --title "MangaReader 0.1.${GITHUB_RUN_NUMBER}" --notes "Signed APK. Build ${GITHUB_RUN_NUMBER}." --latest
+          fi
       - name: Remove temporary signing key
         if: always()
         run: rm -f "$RUNNER_TEMP/manga-signing.p12"

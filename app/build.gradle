@@ -19,13 +19,18 @@ android {
         debug {
             if (System.getenv('MANGA_KEYSTORE_PATH')) signingConfig signingConfigs.stable
         }
+        release {
+            if (System.getenv('MANGA_KEYSTORE_PATH')) signingConfig signingConfigs.stable
+            minifyEnabled false
+        }
     }
     defaultConfig {
         applicationId 'jp.reader.manga'
         minSdk 26
         targetSdk 35
-        versionCode 1
-        versionName '0.1.0'
+        def ciRun = System.getenv('GITHUB_RUN_NUMBER')
+        versionCode ciRun ? 1000 + Integer.parseInt(ciRun) : 1
+        versionName ciRun ? "0.1.${ciRun}" : '0.1.0-local'
     }
 }
 
