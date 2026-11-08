@@ -144,14 +144,14 @@ public class MainActivity extends Activity {
     TextView caption=text("",14);caption.setGravity(Gravity.CENTER);caption.setPadding(4,2,4,2);seekPanel.addView(caption);
     HorizontalScrollView scroller=new HorizontalScrollView(this);scroller.setHorizontalScrollBarEnabled(true);
     LinearLayout strip=new LinearLayout(this);strip.setOrientation(LinearLayout.HORIZONTAL);scroller.addView(strip);seekPanel.addView(scroller,new LinearLayout.LayoutParams(-1,-2));
-    SeekBar seek=new SeekBar(this);seek.setMax(zip.pages.size()-1);seek.setProgress(page);seekPanel.addView(seek,new LinearLayout.LayoutParams(-1,-2));
+    SeekBar seek=new SeekBar(this);seek.setMax(zip.pages.size()-1);seek.setLayoutDirection(View.LAYOUT_DIRECTION_LTR);seek.setProgress(seek.getMax()-page);seekPanel.addView(seek,new LinearLayout.LayoutParams(-1,-2));
     frame.addView(seekPanel,new FrameLayout.LayoutParams(-1,-2,Gravity.BOTTOM));
     controls.setVisibility(controlsVisible?View.VISIBLE:View.GONE);seekPanel.setVisibility(controlsVisible?View.VISIBLE:View.GONE);
     final int requested=page;final RemoteZip current=zip;final TreeSet<Integer> anchors=new TreeSet<>(cuts);
     seek.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener(){
-      public void onProgressChanged(SeekBar v,int progress,boolean fromUser){if(fromUser)scheduleGallery(current,progress,strip,scroller,caption);}
+      public void onProgressChanged(SeekBar v,int progress,boolean fromUser){if(fromUser)scheduleGallery(current,v.getMax()-progress,strip,scroller,caption);}
       public void onStartTrackingTouch(SeekBar v){}
-      public void onStopTrackingTouch(SeekBar v){int target=v.getProgress();if(target!=page)jumpToPage(target);}
+      public void onStopTrackingTouch(SeekBar v){int target=v.getMax()-v.getProgress();if(target!=page)jumpToPage(target);}
     });
     if(controlsVisible)scheduleGallery(current,page,strip,scroller,caption);
     int width=getResources().getDisplayMetrics().widthPixels,height=getResources().getDisplayMetrics().heightPixels;
@@ -163,7 +163,7 @@ public class MainActivity extends Activity {
         if(e.getAction()==android.view.MotionEvent.ACTION_DOWN){x=e.getX();return true;}
         if(e.getAction()==android.view.MotionEvent.ACTION_UP){float delta=e.getX()-x;if(Math.abs(delta)>70){if(delta>0)forward();else backPage();}
           else if(e.getX()<v.getWidth()/3f)forward();else if(e.getX()>v.getWidth()*2f/3f)backPage();
-          else {controlsVisible=!controlsVisible;systemBars(!controlsVisible);controls.setVisibility(controlsVisible?View.VISIBLE:View.GONE);seekPanel.setVisibility(controlsVisible?View.VISIBLE:View.GONE);if(controlsVisible)scheduleGallery(current,seek.getProgress(),strip,scroller,caption);else {clearThumbnail();strip.removeAllViews();}root.requestApplyInsets();controls.requestApplyInsets();seekPanel.requestApplyInsets();}
+          else {controlsVisible=!controlsVisible;systemBars(!controlsVisible);controls.setVisibility(controlsVisible?View.VISIBLE:View.GONE);seekPanel.setVisibility(controlsVisible?View.VISIBLE:View.GONE);if(controlsVisible)scheduleGallery(current,seek.getMax()-seek.getProgress(),strip,scroller,caption);else {clearThumbnail();strip.removeAllViews();}root.requestApplyInsets();controls.requestApplyInsets();seekPanel.requestApplyInsets();}
           return true;}return true;}});
       save();
     });
