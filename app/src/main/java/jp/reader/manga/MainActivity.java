@@ -16,7 +16,7 @@ import java.util.*;
 import java.util.concurrent.*;
 
 public class MainActivity extends Activity {
-  android.content.SharedPreferences prefs; ExecutorService worker=Executors.newSingleThreadExecutor(); Handler ui=new Handler(Looper.getMainLooper()); volatile int generation=0; LinearLayout root; Dav dav; RemoteZip zip; String bookUrl,bookName,folderUrl,folderName; int page=0,next=0; boolean reading=false; HashMap<Integer,Integer> previous=new HashMap<>(); TreeSet<Integer> cuts=new TreeSet<>(); Bitmap right,left; String alias=""; String downloadState=""; TextView downloadLabel; boolean controlsVisible=false; Bitmap thumbnail; ImageView previewView; volatile int previewSerial=0; Runnable previewPending;
+  android.content.SharedPreferences prefs; ExecutorService worker=Executors.newSingleThreadExecutor(); Handler ui=new Handler(Looper.getMainLooper()); volatile int generation=0; LinearLayout root; Dav dav; RemoteZip zip; String bookUrl,bookName,folderUrl,folderName; int page=0,next=0; boolean reading=false; HashMap<Integer,Integer> previous=new HashMap<>(); TreeSet<Integer> cuts=new TreeSet<>(); Bitmap right,left; String alias=""; String downloadState=""; TextView downloadLabel; boolean controlsVisible=false; final ExecutorService thumbWorker=Executors.newSingleThreadExecutor(); final ArrayList<ImageView> thumbnailViews=new ArrayList<>(); final ArrayList<Bitmap> thumbnailBitmaps=new ArrayList<>(); volatile int previewSerial=0; Runnable previewPending;
   interface Task<T>{T run() throws Exception;} interface Done<T>{void accept(T x) throws Exception;}
   public void onCreate(Bundle b){super.onCreate(b);prefs=getSharedPreferences("reader",MODE_PRIVATE);alias=prefs.getString("alias","");DownloadCache.cleanup(this);home();}
   void clear(){
@@ -28,7 +28,7 @@ public class MainActivity extends Activity {
     root.setBackgroundColor(0xfffafafa);
     // Android 15+ may draw edge-to-edge. Keep buttons out of system gesture/status/navigation areas.
     root.setOnApplyWindowInsetsListener((view,insets)->{
-      if(reading && !controlsVisible) view.setPadding(0,0,0,0);
+      if(reading) view.setPadding(0,0,0,0);
       else view.setPadding(insets.getSystemWindowInsetLeft(),insets.getSystemWindowInsetTop(),
           insets.getSystemWindowInsetRight(),insets.getSystemWindowInsetBottom());
       return insets;
@@ -46,10 +46,18 @@ public class MainActivity extends Activity {
     v.setText(styled);return v;
   }
   void systemBars(boolean immersive){
-    int flags=immersive?(View.SYSTEM_UI_FLAG_FULLSCREEN|View.SYSTEM_UI_FLAG_HIDE_NAVIGATION|View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY|View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN|View.SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION|View.SYSTEM_UI_FLAG_LAYOUT_STABLE):0;
+    int layout=reading?(View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN|View.SYSTEM_UI_FLAG_LAYOUT_HIDE_NAVIGATION|View.SYSTEM_UI_FLAG_LAYOUT_STABLE):0;
+    int flags=layout|(immersive?(View.SYSTEM_UI_FLAG_FULLSCREEN|View.SYSTEM_UI_FLAG_HIDE_NAVIGATION|View.SYSTEM_UI_FLAG_IMMERSIVE_STICKY):0);
     getWindow().getDecorView().setSystemUiVisibility(flags);
   }
-  void clearThumbnail(){previewSerial++;if(previewView!=null){previewView.setImageDrawable(null);previewView=null;}if(previewPending!=null){ui.removeCallbacks(previewPending);previewPending=null;}if(thumbnail!=null){thumbnail.recycle();thumbnail=null;}}
+  void clearThumbnail(){
+    previewSerial++;
+    if(previewPending!=null){ui.removeCallbacks(previewPending);previewPending=null;}
+    for(ImageView view:thumbnailViews)view.setImageDrawable(null);
+    thumbnailViews.clear();
+    for(Bitmap bitmap:thumbnailBitmaps)bitmap.recycle();
+    thumbnailBitmaps.clear();
+  }
   Button button(String s,Runnable r){Button b=new Button(this);b.setText(s);b.setAllCaps(false);b.setOnClickListener(v->r.run());return b;}
   LinearLayout scroll(){ScrollView sv=new ScrollView(this);LinearLayout l=new LinearLayout(this);l.setOrientation(1);sv.addView(l);root.addView(sv,new LinearLayout.LayoutParams(-1,0,1));return l;}
   void message(String s){Toast.makeText(this,s,Toast.LENGTH_LONG).show();}
@@ -73,49 +81,78 @@ public class MainActivity extends Activity {
   void save(){if(zip==null)return;JSONObject o=record(bookUrl);try{o.put("url",bookUrl);o.put("name",bookName);o.put("folder",folderUrl);o.put("folderName",folderName);o.put("page",page);o.put("total",zip.pages.size());o.put("time",System.currentTimeMillis());o.put("finished",false);JSONArray a=new JSONArray();for(int cut:cuts)a.put(cut);o.put("cuts",a);put(bookUrl,o);}catch(Exception ignored){}}
   void release(){if(right!=null){right.recycle();right=null;}if(left!=null){left.recycle();left=null;}}
   static final class Spread {Bitmap a,b;int next;Spread(Bitmap x,Bitmap y,int n){a=x;b=y;next=n;}}
-  void schedulePreview(RemoteZip current,int index,ImageView preview,TextView caption){
-    int serial=++previewSerial; int currentGeneration=generation;
-    if(previewPending!=null)ui.removeCallbacks(previewPending);
+  void scheduleGallery(RemoteZip current,int index,LinearLayout strip,HorizontalScrollView scroller,TextView caption){
+    clearThumbnail();strip.removeAllViews();
+    int serial=previewSerial, currentGeneration=generation;
     caption.setText((index+1)+" / "+current.pages.size());
-    previewPending=()->worker.execute(()->{
-      if(serial!=previewSerial || currentGeneration!=generation)return;
-      try{
-        Bitmap result=current.bitmap(index,240,320);
-        ui.post(()->{
-          if(serial!=previewSerial || currentGeneration!=generation || !controlsVisible){result.recycle();return;}
-          preview.setImageBitmap(result);
-          Bitmap old=thumbnail;thumbnail=result;if(old!=null)old.recycle();
+    int first=Math.max(0,index-10), last=Math.min(current.pages.size()-1,index+10);
+    int density=(int)(getResources().getDisplayMetrics().density*100);
+    int cardWidth=Math.max(1,80*density/100), imageHeight=Math.max(1,105*density/100);
+    ArrayList<ImageView> views=new ArrayList<>();
+    for(int i=first;i<=last;i++){
+      final int target=i;
+      LinearLayout card=new LinearLayout(this);card.setOrientation(1);card.setGravity(Gravity.CENTER);
+      card.setBackgroundColor(i==index?0xffc8c8c8:0xffeeeeee);
+      ImageView image=new ImageView(this);image.setScaleType(ImageView.ScaleType.FIT_CENTER);
+      image.setBackgroundColor(0xffdddddd);
+      card.addView(image,new LinearLayout.LayoutParams(cardWidth,imageHeight));
+      TextView number=text(String.valueOf(i+1),12);number.setGravity(Gravity.CENTER);number.setPadding(2,2,2,2);card.addView(number);
+      LinearLayout.LayoutParams cardParams=new LinearLayout.LayoutParams(cardWidth,-2);cardParams.setMargins(2,2,2,2);strip.addView(card,cardParams);
+      views.add(image);thumbnailViews.add(image);
+      card.setOnClickListener(v->{previous.clear();page=target;next=0;controlsVisible=false;render();});
+    }
+    scroller.post(()->{if(serial==previewSerial && generation==currentGeneration){int center=(index-first)*(cardWidth+4)+cardWidth/2;scroller.scrollTo(Math.max(0,center-scroller.getWidth()/2),0);}});
+    // Debounce changes, load nearest pages first, and never block the main page worker.
+    previewPending=()->{
+      ArrayList<Integer> order=new ArrayList<>();
+      for(int n=0;n<=10;n++){if(index+n<=last)order.add(index+n);if(n>0 && index-n>=first)order.add(index-n);}
+      for(int target:order){
+        ImageView image=views.get(target-first);
+        thumbWorker.execute(()->{
+          if(serial!=previewSerial || currentGeneration!=generation)return;
+          try{
+            Bitmap bitmap=current.bitmap(target,140,180);
+            ui.post(()->{
+              if(serial!=previewSerial || currentGeneration!=generation || !controlsVisible){bitmap.recycle();return;}
+              image.setImageBitmap(bitmap);thumbnailBitmaps.add(bitmap);
+            });
+          }catch(Exception e){ui.post(()->{if(serial==previewSerial && currentGeneration==generation)image.setBackgroundColor(0xffaaaaaa);});}
         });
-      }catch(Exception e){ui.post(()->{if(serial==previewSerial && currentGeneration==generation)caption.setText((index+1)+" / "+current.pages.size()+"（プレビューを取得できません）");});}
-    });
+      }
+    };
     ui.postDelayed(previewPending,250);
   }
   void render(){
     if(zip==null)return;
     clear();release();
-    LinearLayout controls=new LinearLayout(this);controls.setOrientation(1);
+    FrameLayout frame=new FrameLayout(this);
+    root.addView(frame,new LinearLayout.LayoutParams(-1,0,1));
+    LinearLayout images=new LinearLayout(this);images.setGravity(Gravity.CENTER);
+    frame.addView(images,new FrameLayout.LayoutParams(-1,-1));
+    LinearLayout controls=new LinearLayout(this);controls.setOrientation(1);controls.setBackgroundColor(0xeef5f5f5);
+    controls.setOnApplyWindowInsetsListener((view,insets)->{view.setPadding(insets.getSystemWindowInsetLeft(),insets.getSystemWindowInsetTop(),insets.getSystemWindowInsetRight(),0);return insets;});
     LinearLayout bar=new LinearLayout(this);
     bar.addView(button("← ホーム",this::home));
     bar.addView(button("見開き調整",()->new AlertDialog.Builder(this).setTitle("見開き調整").setItems(new String[]{"このページの次から1ページずらす","この本の調整をすべて解除"},(d,n)->{if(n==0 && page+1<zip.pages.size())cuts.add(page+1);else if(n==1)cuts.clear();previous.clear();render();}).show()));
     controls.addView(bar);
     downloadLabel=text("端末への保存: "+downloadState,12);controls.addView(downloadLabel);
     TextView status=text("読み込み中…",14);controls.addView(status);
-    root.addView(controls);
-    LinearLayout images=new LinearLayout(this);images.setGravity(Gravity.CENTER);root.addView(images,new LinearLayout.LayoutParams(-1,0,1));
-    LinearLayout seekPanel=new LinearLayout(this);seekPanel.setOrientation(1);seekPanel.setGravity(Gravity.CENTER);
-    ImageView preview=new ImageView(this);previewView=preview;preview.setScaleType(ImageView.ScaleType.FIT_CENTER);
-    int thumbHeight=(int)(140*getResources().getDisplayMetrics().density);
-    seekPanel.addView(preview,new LinearLayout.LayoutParams(-1,thumbHeight));
-    TextView caption=text("",14);caption.setGravity(Gravity.CENTER);seekPanel.addView(caption);
-    SeekBar seek=new SeekBar(this);seek.setMax(zip.pages.size()-1);seek.setProgress(page);seekPanel.addView(seek,new LinearLayout.LayoutParams(-1,-2));root.addView(seekPanel);
+    frame.addView(controls,new FrameLayout.LayoutParams(-1,-2,Gravity.TOP));
+    LinearLayout seekPanel=new LinearLayout(this);seekPanel.setOrientation(1);seekPanel.setGravity(Gravity.CENTER);seekPanel.setBackgroundColor(0xeef5f5f5);
+    seekPanel.setOnApplyWindowInsetsListener((view,insets)->{view.setPadding(insets.getSystemWindowInsetLeft(),0,insets.getSystemWindowInsetRight(),insets.getSystemWindowInsetBottom());return insets;});
+    TextView caption=text("",14);caption.setGravity(Gravity.CENTER);caption.setPadding(4,2,4,2);seekPanel.addView(caption);
+    HorizontalScrollView scroller=new HorizontalScrollView(this);scroller.setHorizontalScrollBarEnabled(true);
+    LinearLayout strip=new LinearLayout(this);strip.setOrientation(LinearLayout.HORIZONTAL);scroller.addView(strip);seekPanel.addView(scroller,new LinearLayout.LayoutParams(-1,-2));
+    SeekBar seek=new SeekBar(this);seek.setMax(zip.pages.size()-1);seek.setProgress(page);seekPanel.addView(seek,new LinearLayout.LayoutParams(-1,-2));
+    frame.addView(seekPanel,new FrameLayout.LayoutParams(-1,-2,Gravity.BOTTOM));
     controls.setVisibility(controlsVisible?View.VISIBLE:View.GONE);seekPanel.setVisibility(controlsVisible?View.VISIBLE:View.GONE);
     final int requested=page;final RemoteZip current=zip;final TreeSet<Integer> anchors=new TreeSet<>(cuts);
     seek.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener(){
-      public void onProgressChanged(SeekBar v,int progress,boolean fromUser){if(fromUser)schedulePreview(current,progress,preview,caption);}
+      public void onProgressChanged(SeekBar v,int progress,boolean fromUser){if(fromUser)scheduleGallery(current,progress,strip,scroller,caption);}
       public void onStartTrackingTouch(SeekBar v){}
       public void onStopTrackingTouch(SeekBar v){int target=v.getProgress();if(target!=page){previous.clear();page=target;next=0;controlsVisible=false;render();}}
     });
-    if(controlsVisible)schedulePreview(current,page,preview,caption);
+    if(controlsVisible)scheduleGallery(current,page,strip,scroller,caption);
     int width=getResources().getDisplayMetrics().widthPixels,height=getResources().getDisplayMetrics().heightPixels;
     async(()->{Bitmap a=current.bitmap(requested,width,height);Bitmap b=null;int n=requested+1;if(a.getWidth()<a.getHeight()&&n<current.pages.size()&&!anchors.contains(n)){try{b=current.bitmap(n,width,height);}catch(Exception e){a.recycle();throw e;}if(b.getWidth()<b.getHeight())n++;else{b.recycle();b=null;}}return new Spread(a,b,n);},s->{
       release();right=s.a;left=s.b;next=s.next;status.setText((page+1)+(next>page+1?"–"+next:"")+" / "+zip.pages.size());
@@ -125,7 +162,7 @@ public class MainActivity extends Activity {
         if(e.getAction()==android.view.MotionEvent.ACTION_DOWN){x=e.getX();return true;}
         if(e.getAction()==android.view.MotionEvent.ACTION_UP){float delta=e.getX()-x;if(Math.abs(delta)>70){if(delta>0)forward();else backPage();}
           else if(e.getX()<v.getWidth()/3f)forward();else if(e.getX()>v.getWidth()*2f/3f)backPage();
-          else {controlsVisible=!controlsVisible;systemBars(!controlsVisible);controls.setVisibility(controlsVisible?View.VISIBLE:View.GONE);seekPanel.setVisibility(controlsVisible?View.VISIBLE:View.GONE);if(controlsVisible){previewView=preview;schedulePreview(current,seek.getProgress(),preview,caption);}else {preview.setImageDrawable(null);clearThumbnail();}root.requestApplyInsets();}
+          else {controlsVisible=!controlsVisible;systemBars(!controlsVisible);controls.setVisibility(controlsVisible?View.VISIBLE:View.GONE);seekPanel.setVisibility(controlsVisible?View.VISIBLE:View.GONE);if(controlsVisible)scheduleGallery(current,seek.getProgress(),strip,scroller,caption);else {clearThumbnail();strip.removeAllViews();}root.requestApplyInsets();controls.requestApplyInsets();seekPanel.requestApplyInsets();}
           return true;}return true;}});
       save();
     });
@@ -141,5 +178,5 @@ public class MainActivity extends Activity {
   }
   void backPage(){if(zip==null||page<=0)return;Integer p=previous.get(page);page=p!=null?p:Math.max(0,page-2);next=0;controlsVisible=false;render();}
   @Override public void onBackPressed(){if(reading)home();else home();}
-  @Override protected void onDestroy(){generation++;worker.shutdownNow();clearThumbnail();release();super.onDestroy();}
+  @Override protected void onDestroy(){generation++;worker.shutdownNow();thumbWorker.shutdownNow();clearThumbnail();release();super.onDestroy();}
 }
