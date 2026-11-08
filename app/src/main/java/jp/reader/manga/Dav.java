@@ -3,8 +3,6 @@ package jp.reader.manga;
 import android.content.Context;
 import android.security.KeyChain;
 import android.util.Base64;
-import org.w3c.dom.*;
-import javax.xml.parsers.DocumentBuilderFactory;
 import javax.net.ssl.*;
 import java.io.*;
 import java.net.*;
@@ -49,11 +47,10 @@ final class Dav {
     okhttp3.Request.Builder req=new okhttp3.Request.Builder().url(url).header("Depth","1").header("User-Agent",USER_AGENT).header("Accept-Encoding","identity").method("PROPFIND",okhttp3.RequestBody.create("<?xml version=\"1.0\"?><d:propfind xmlns:d=\"DAV:\"><d:prop><d:resourcetype/><d:displayname/></d:prop></d:propfind>",okhttp3.MediaType.get("application/xml; charset=utf-8")));
     if(!user.isEmpty())req.header("Authorization","Basic "+Base64.encodeToString((user+":"+pass).getBytes("UTF-8"),Base64.NO_WRAP));
     try(okhttp3.Response response=builder.build().newCall(req.build()).execute()) {if(response.code()!=207||response.body()==null)throw new IOException("WebDAV一覧取得失敗 HTTP "+response.code());
-      DocumentBuilderFactory f=DocumentBuilderFactory.newInstance();f.setNamespaceAware(true);f.setFeature("http://apache.org/xml/features/disallow-doctype-decl",true);f.setFeature("http://xml.org/sax/features/external-general-entities",false);f.setFeature("http://xml.org/sax/features/external-parameter-entities",false);
-      Document d=f.newDocumentBuilder().parse(new ByteArrayInputStream(read(response.body().byteStream(),4*1024*1024)));NodeList rs=d.getElementsByTagNameNS("DAV:","response");List<Item> out=new ArrayList<>();
-      for(int i=0;i<rs.getLength();i++){Element e=(Element)rs.item(i);NodeList h=e.getElementsByTagNameNS("DAV:","href");if(h.getLength()==0)continue;String href=new URL(new URL(url),h.item(0).getTextContent()).toExternalForm();if(href.replaceAll("/$","").equals(url.replaceAll("/$","")))continue;
+      List<DavXml.Entry> entries=DavXml.parse(read(response.body().byteStream(),4*1024*1024));List<Item> out=new ArrayList<>();
+      for(DavXml.Entry entry:entries){String href=new URL(new URL(url),entry.href).toExternalForm();if(href.replaceAll("/$","").equals(url.replaceAll("/$","")))continue;
         URL target=new URL(href);URL origin=new URL(base);if(!target.getProtocol().equals("https") || !target.getHost().equalsIgnoreCase(origin.getHost()) || target.getPort()!=origin.getPort())continue;
-        boolean dir=e.getElementsByTagNameNS("DAV:","collection").getLength()>0;String path=target.getPath().replaceAll("/$","");String name=URLDecoder.decode(path.substring(path.lastIndexOf('/')+1).replace("+","%2B"),"UTF-8");if(dir&&!href.endsWith("/"))href+="/";
+        boolean dir=entry.directory;String path=target.getPath().replaceAll("/$","");String name=URLDecoder.decode(path.substring(path.lastIndexOf('/')+1).replace("+","%2B"),"UTF-8");if(dir&&!href.endsWith("/"))href+="/";
         if(dir||name.toLowerCase(Locale.ROOT).endsWith(".zip")||name.toLowerCase(Locale.ROOT).endsWith(".cbz"))out.add(new Item(href,name,dir));
       }return out;
     }
