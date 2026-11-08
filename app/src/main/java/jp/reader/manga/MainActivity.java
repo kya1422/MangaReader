@@ -16,7 +16,7 @@ import java.util.*;
 import java.util.concurrent.*;
 
 public class MainActivity extends Activity {
-  android.content.SharedPreferences prefs; ExecutorService worker=Executors.newSingleThreadExecutor(); Handler ui=new Handler(Looper.getMainLooper()); volatile int generation=0; LinearLayout root; Dav dav; RemoteZip zip; String bookUrl,bookName,folderUrl,folderName; int page=0,next=0; boolean reading=false; HashMap<Integer,Integer> previous=new HashMap<>(); TreeSet<Integer> cuts=new TreeSet<>(); Bitmap right,left; String alias=""; String downloadState=""; TextView downloadLabel; boolean controlsVisible=false; final ExecutorService thumbWorker=Executors.newSingleThreadExecutor(); final ArrayList<ImageView> thumbnailViews=new ArrayList<>(); final ArrayList<Bitmap> thumbnailBitmaps=new ArrayList<>(); volatile int previewSerial=0; Runnable previewPending;
+  android.content.SharedPreferences prefs; ExecutorService worker=Executors.newSingleThreadExecutor(); Handler ui=new Handler(Looper.getMainLooper()); volatile int generation=0; LinearLayout root; Dav dav; RemoteZip zip; String bookUrl,bookName,folderUrl,folderName; int page=0,next=0; boolean reading=false; HashMap<Integer,Integer> previous=new HashMap<>(); TreeSet<Integer> cuts=new TreeSet<>(); Bitmap right,left; String alias=""; String downloadState=""; TextView downloadLabel; boolean controlsVisible=false; boolean leftToRightSpread=false; final ExecutorService thumbWorker=Executors.newSingleThreadExecutor(); final ArrayList<ImageView> thumbnailViews=new ArrayList<>(); final ArrayList<Bitmap> thumbnailBitmaps=new ArrayList<>(); volatile int previewSerial=0; Runnable previewPending;
   interface Task<T>{T run() throws Exception;} interface Done<T>{void accept(T x) throws Exception;}
   public void onCreate(Bundle b){super.onCreate(b);prefs=getSharedPreferences("reader",MODE_PRIVATE);alias=prefs.getString("alias","");DownloadCache.cleanup(this);home();}
   void clear(){
@@ -111,8 +111,8 @@ public class MainActivity extends Activity {
   }
   Dav client() throws Exception{return new Dav(this,prefs.getString("url",""),prefs.getString("user",""),PasswordStore.read(prefs),prefs.getString("alias",""));}
   void browse(String url,String name){if(url.isEmpty()){settings();return;}reading=false;clear();release();root.addView(button("← ホーム",this::home));root.addView(text(clean(name),23));LinearLayout list=scroll();TextView status=text("読み込み中…",16);list.addView(status);async(()->{Dav d=client();return d.list(url);},items->{list.removeView(status);items.sort((a,b)->a.dir!=b.dir?(a.dir?-1:1):RemoteZip.natural(a.name,b.name));for(Dav.Item item:items){JSONObject rec=record(item.url);String sub=item.dir?"フォルダ":rec.length()==0?"未読":rec.optBoolean("finished")?"既読":"途中  "+(rec.optInt("page")+1)+" / "+rec.optInt("total");TextView v=entry(clean(item.name),author(item.name)+"  "+sub);list.addView(v);v.setOnClickListener(w->{if(item.dir)browse(item.url,item.name);else openBook(item.url,item.name,url,name);});}if(items.isEmpty())list.addView(text("フォルダまたはZIPがありません",16));});}
-  void openBook(String url,String name,String folder,String fname){bookUrl=url;bookName=name;folderUrl=folder;folderName=fname;reading=true;controlsVisible=false;previous.clear();cuts.clear();JSONObject rec=record(url);page=rec.optInt("page",0);JSONArray arr=rec.optJSONArray("cuts");if(arr!=null)for(int i=0;i<arr.length();i++)cuts.add(arr.optInt(i));clear();loadingBars();root.addView(button("← ホーム",this::home));root.addView(text("本を開いています…",20));downloadState="保存準備中";async(()->{Dav d=client();RemoteZip opened=new RemoteZip(d,url);DownloadCache.start(this,d,url,state->ui.post(()->{if(reading && url.equals(bookUrl)){downloadState=state;if(downloadLabel!=null)downloadLabel.setText("端末への保存: "+state);}}));return opened;},z->{zip=z;page=Math.max(0,Math.min(page,zip.pages.size()-1));render();});}
-  void save(){if(zip==null)return;JSONObject o=record(bookUrl);try{o.put("url",bookUrl);o.put("name",bookName);o.put("folder",folderUrl);o.put("folderName",folderName);o.put("page",page);o.put("total",zip.pages.size());o.put("time",System.currentTimeMillis());o.put("finished",false);JSONArray a=new JSONArray();for(int cut:cuts)a.put(cut);o.put("cuts",a);put(bookUrl,o);}catch(Exception ignored){}}
+  void openBook(String url,String name,String folder,String fname){bookUrl=url;bookName=name;folderUrl=folder;folderName=fname;reading=true;controlsVisible=false;previous.clear();cuts.clear();JSONObject rec=record(url);leftToRightSpread=rec.optBoolean("leftToRightSpread",false);page=rec.optInt("page",0);JSONArray arr=rec.optJSONArray("cuts");if(arr!=null)for(int i=0;i<arr.length();i++)cuts.add(arr.optInt(i));clear();loadingBars();root.addView(button("← ホーム",this::home));root.addView(text("本を開いています…",20));downloadState="保存準備中";async(()->{Dav d=client();RemoteZip opened=new RemoteZip(d,url);DownloadCache.start(this,d,url,state->ui.post(()->{if(reading && url.equals(bookUrl)){downloadState=state;if(downloadLabel!=null)downloadLabel.setText("端末への保存: "+state);}}));return opened;},z->{zip=z;page=Math.max(0,Math.min(page,zip.pages.size()-1));render();});}
+  void save(){if(zip==null)return;JSONObject o=record(bookUrl);try{o.put("url",bookUrl);o.put("name",bookName);o.put("folder",folderUrl);o.put("folderName",folderName);o.put("page",page);o.put("total",zip.pages.size());o.put("time",System.currentTimeMillis());o.put("finished",false);o.put("leftToRightSpread",leftToRightSpread);JSONArray a=new JSONArray();for(int cut:cuts)a.put(cut);o.put("cuts",a);put(bookUrl,o);}catch(Exception ignored){}}
   void release(){if(right!=null){right.recycle();right=null;}if(left!=null){left.recycle();left=null;}}
   static final class Spread {Bitmap a,b;int next;Spread(Bitmap x,Bitmap y,int n){a=x;b=y;next=n;}}
   void scheduleGallery(RemoteZip current,int index,LinearLayout strip,HorizontalScrollView scroller,TextView caption){
@@ -169,6 +169,10 @@ public class MainActivity extends Activity {
     LinearLayout bar=new LinearLayout(this);
     bar.addView(button("← ホーム",this::home));
     bar.addView(button("見開き調整",()->new AlertDialog.Builder(this).setTitle("見開き調整").setItems(new String[]{"このページの次から1ページずらす","この本の調整をすべて解除"},(d,n)->{if(n==0 && page+1<zip.pages.size())cuts.add(page+1);else if(n==1)cuts.clear();previous.clear();render();}).show()));
+    bar.addView(button("見開き左右",()->new AlertDialog.Builder(this).setTitle("見開きの表示順")
+      .setSingleChoiceItems(new String[]{"右開き（先のページが右）","左開き（先のページが左）"},leftToRightSpread?1:0,(dialog,choice)->{
+        leftToRightSpread=choice==1;save();dialog.dismiss();render();
+      }).setNegativeButton("キャンセル",null).show()));
     controls.addView(bar);
     downloadLabel=text("端末への保存: "+downloadState,12);controls.addView(downloadLabel);
     TextView status=text("読み込み中…",14);controls.addView(status);
@@ -191,8 +195,10 @@ public class MainActivity extends Activity {
     int width=getResources().getDisplayMetrics().widthPixels,height=getResources().getDisplayMetrics().heightPixels;
     async(()->{Bitmap a=current.bitmap(requested,width,height);Bitmap b=null;int n=requested+1;if(!current.isWide(requested)&&n<current.pages.size()&&!anchors.contains(n)){try{b=current.bitmap(n,width,height);}catch(Exception e){a.recycle();throw e;}if(!current.isWide(n))n++;else{b.recycle();b=null;}}return new Spread(a,b,n);},s->{
       release();right=s.a;left=s.b;next=s.next;status.setText((page+1)+(next>page+1?"–"+next:"")+" / "+zip.pages.size());
-      if(left!=null){ImageView lv=new ImageView(this);lv.setImageBitmap(left);lv.setScaleType(ImageView.ScaleType.FIT_CENTER);images.addView(lv,new LinearLayout.LayoutParams(0,-1,1));}
-      ImageView rv=new ImageView(this);rv.setImageBitmap(right);rv.setScaleType(ImageView.ScaleType.FIT_CENTER);images.addView(rv,new LinearLayout.LayoutParams(0,-1,1));
+      if(left!=null){
+        addPageImage(images,leftToRightSpread?right:left);
+        addPageImage(images,leftToRightSpread?left:right);
+      }else addPageImage(images,right);
       images.setOnTouchListener(new View.OnTouchListener(){float x;public boolean onTouch(View v,android.view.MotionEvent e){
         if(e.getAction()==android.view.MotionEvent.ACTION_DOWN){x=e.getX();return true;}
         if(e.getAction()==android.view.MotionEvent.ACTION_UP){float delta=e.getX()-x;if(Math.abs(delta)>70){if(delta>0)forward();else backPage();}
@@ -201,6 +207,10 @@ public class MainActivity extends Activity {
           return true;}return true;}});
       save();
     });
+  }
+  void addPageImage(LinearLayout container,Bitmap image){
+    ImageView v=new ImageView(this);v.setImageBitmap(image);v.setScaleType(ImageView.ScaleType.FIT_CENTER);
+    container.addView(v,new LinearLayout.LayoutParams(0,-1,1));
   }
   void jumpToPage(int target){
     if(zip==null)return;
