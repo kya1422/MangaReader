@@ -35,3 +35,6 @@ BOOXなどのAndroid電子ペーパー端末向け。WebDAVのJPEG入りZIP/CBZ�
 
 ## 固定署名の設定
 CIで継続的に上書き更新可能なAPKを作るため、リポジトリのActions secretsに `MANGA_KEYSTORE_BASE64`、`MANGA_KEYSTORE_PASSWORD`、`MANGA_KEY_ALIAS` を設定してください。これらがない場合、CIはデフォルト鍵に切り替えずに失敗します。キーストアと鍵は同一パスワードとしています。署名鍵とパスワードは公開せず、安全にバックアップしてください。鍵を紛失すると既存のアプリを上書き更新できません。すでに別の鍵で署名したAPKからの最初の移行にはアンインストールが必要で、アプリデータも消えます。Pull request元でSecretsが使えない場合は署名ステップが失敗します。
+
+## User-Agent
+WebDAVのフォルダ一覧（PROPFIND）、部分取得・ダウンロード（GET）のいずれも `MangaReader/0.1 (Android)` を送信します。User-Agentは偽装できるため、アクセス認証として単独で使用しないでください。

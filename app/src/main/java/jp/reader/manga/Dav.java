@@ -13,6 +13,7 @@ import java.security.cert.X509Certificate;
 import java.util.*;
 
 final class Dav {
+  static final String USER_AGENT = "MangaReader/0.1 (Android)";
   static final class Item { String url,name; boolean dir; Item(String u,String n,boolean d){url=u;name=n;dir=d;} }
   final Context ctx; final String base,user,pass,alias; final SSLSocketFactory ssl; final X509TrustManager trust;
   Dav(Context c,String b,String u,String p,String a) throws Exception {
@@ -37,7 +38,7 @@ final class Dav {
     URL original=new URL(base), target=new URL(u);
     if(!"https".equalsIgnoreCase(target.getProtocol()) || !original.getHost().equalsIgnoreCase(target.getHost()) || original.getPort()!=target.getPort()) throw new IOException("設定したWebDAV以外への接続は許可されません");
     HttpsURLConnection c=(HttpsURLConnection)target.openConnection(); if(ssl!=null)c.setSSLSocketFactory(ssl);
-    c.setInstanceFollowRedirects(false);c.setConnectTimeout(20000);c.setReadTimeout(30000);c.setRequestMethod(method);c.setRequestProperty("Accept-Encoding","identity");
+    c.setInstanceFollowRedirects(false);c.setConnectTimeout(20000);c.setReadTimeout(30000);c.setRequestMethod(method);c.setRequestProperty("Accept-Encoding","identity");c.setRequestProperty("User-Agent",USER_AGENT);
     if(!user.isEmpty())c.setRequestProperty("Authorization","Basic "+Base64.encodeToString((user+":"+pass).getBytes("UTF-8"),Base64.NO_WRAP));return c;
   }
   static byte[] read(InputStream in,int max) throws IOException { try(InputStream s=in;ByteArrayOutputStream o=new ByteArrayOutputStream()){byte[] b=new byte[16384];int n,total=0;while((n=s.read(b))!=-1){total+=n;if(total>max)throw new IOException("データが上限を超えました");o.write(b,0,n);}return o.toByteArray();} }
@@ -45,7 +46,7 @@ final class Dav {
     URL root=new URL(base), targetUrl=new URL(url); if(!"https".equals(targetUrl.getProtocol()) || !root.getHost().equalsIgnoreCase(targetUrl.getHost()) || root.getPort()!=targetUrl.getPort()) throw new IOException("接続先が不正です");
     okhttp3.OkHttpClient.Builder builder=new okhttp3.OkHttpClient.Builder().followRedirects(false).followSslRedirects(false).connectTimeout(20,java.util.concurrent.TimeUnit.SECONDS).readTimeout(30,java.util.concurrent.TimeUnit.SECONDS);
     if(ssl!=null)builder.sslSocketFactory(ssl,trust);
-    okhttp3.Request.Builder req=new okhttp3.Request.Builder().url(url).header("Depth","1").header("Accept-Encoding","identity").method("PROPFIND",okhttp3.RequestBody.create("<?xml version=\"1.0\"?><d:propfind xmlns:d=\"DAV:\"><d:prop><d:resourcetype/><d:displayname/></d:prop></d:propfind>",okhttp3.MediaType.get("application/xml; charset=utf-8")));
+    okhttp3.Request.Builder req=new okhttp3.Request.Builder().url(url).header("Depth","1").header("User-Agent",USER_AGENT).header("Accept-Encoding","identity").method("PROPFIND",okhttp3.RequestBody.create("<?xml version=\"1.0\"?><d:propfind xmlns:d=\"DAV:\"><d:prop><d:resourcetype/><d:displayname/></d:prop></d:propfind>",okhttp3.MediaType.get("application/xml; charset=utf-8")));
     if(!user.isEmpty())req.header("Authorization","Basic "+Base64.encodeToString((user+":"+pass).getBytes("UTF-8"),Base64.NO_WRAP));
     try(okhttp3.Response response=builder.build().newCall(req.build()).execute()) {if(response.code()!=207||response.body()==null)throw new IOException("WebDAV一覧取得失敗 HTTP "+response.code());
       DocumentBuilderFactory f=DocumentBuilderFactory.newInstance();f.setNamespaceAware(true);f.setFeature("http://apache.org/xml/features/disallow-doctype-decl",true);f.setFeature("http://xml.org/sax/features/external-general-entities",false);f.setFeature("http://xml.org/sax/features/external-parameter-entities",false);
