@@ -45,6 +45,14 @@ final class PasswordStore {
     return legacy;
   }
 
+  /** Explicit destructive recovery only; never discard unreadable data automatically. */
+  static synchronized void reset(SharedPreferences prefs) throws Exception {
+    if(!prefs.edit().remove(CIPHER_KEY).remove(IV_KEY).remove(LEGACY_KEY).commit())
+      throw new java.io.IOException("保存済みパスワードを削除できませんでした");
+    KeyStore ks=KeyStore.getInstance("AndroidKeyStore");ks.load(null);
+    if(ks.containsAlias(KEY_ALIAS))ks.deleteEntry(KEY_ALIAS);
+  }
+
   static synchronized void write(SharedPreferences prefs,String password) throws Exception {
     if(password.isEmpty()){
       if(!prefs.edit().remove(CIPHER_KEY).remove(IV_KEY).remove(LEGACY_KEY).commit())throw new java.io.IOException("パスワード設定を保存できませんでした");

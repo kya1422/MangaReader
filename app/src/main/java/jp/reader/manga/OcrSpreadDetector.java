@@ -37,7 +37,10 @@ final class OcrSpreadDetector {
   }
   private static Integer corner(TextRecognizer recognizer,Bitmap page,boolean left,int maxPage)throws Exception {
     int w=Math.max(1,page.getWidth()/4),h=Math.max(1,page.getHeight()/5);
-    Bitmap crop=Bitmap.createBitmap(page,left?0:page.getWidth()-w,page.getHeight()-h,w,h);
+    Bitmap original=Bitmap.createBitmap(page,left?0:page.getWidth()-w,page.getHeight()-h,w,h);
+    Bitmap crop=original.copy(Bitmap.Config.ARGB_8888,false);
+    if(crop!=original)original.recycle();
+    if(crop==null)throw new java.io.IOException("OCR画像を作成できません");
     Task<Text> task=null;
     try{
       task=recognizer.process(InputImage.fromBitmap(crop,0));Text text=Tasks.await(task);Integer result=null;
