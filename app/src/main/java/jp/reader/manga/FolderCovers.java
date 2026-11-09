@@ -25,9 +25,13 @@ final class FolderCovers {
   }
   static Bitmap load(Context ctx,String folderUrl,String title)throws Exception{
     File dir=new File(ctx.getCacheDir(),"folder-covers");if(!dir.exists()&&!dir.mkdirs())return null;
-    File file=new File(dir,key(folderUrl+"\n"+title)+".jpg");long now=System.currentTimeMillis();
-    if(file.isFile() && now>=file.lastModified() && now-file.lastModified()<TTL){Bitmap hit=BitmapFactory.decodeFile(file.getPath());if(hit!=null)return hit;file.delete();}
-    else file.delete();
+    String prefix=key(folderUrl+"\n"+title)+"-";long now=System.currentTimeMillis();
+    File[] hits=dir.listFiles((d,n)->n.startsWith(prefix)&&n.endsWith(".jpg"));
+    if(hits!=null)for(File hit:hits){
+      try{long expiry=Long.parseLong(hit.getName().substring(prefix.length(),hit.getName().length()-4));
+        if(now<expiry && now>=hit.lastModified() && now-hit.lastModified()<TTL){Bitmap bitmap=BitmapFactory.decodeFile(hit.getPath());if(bitmap!=null)return bitmap;}
+      }catch(NumberFormatException ignored){}hit.delete();
+    }
     if(title.trim().isEmpty())return null;
     throttle();String query=URLEncoder.encode(title+" 1 manga","UTF-8");
     HttpURLConnection search=request("https://openlibrary.org/search.json?q="+query+"&limit=10&fields=title,cover_i");
@@ -39,22 +43,34 @@ final class FolderCovers {
       for(int i=0;i<docs.length();i++){JSONObject doc=docs.optJSONObject(i);if(doc==null)continue;long id=doc.optLong("cover_i",0);if(id>0&&CoverMatch.matchesFirstVolume(title,doc.optString("title",""))){coverId=id;break;}}
     }finally{search.disconnect();}
     if(coverId==0)return null;
-    HttpURLConnection cover=request("https://covers.openlibrary.org/b/id/"+coverId+"-M.jpg?default=false");
-    try{
-      int coverCode=cover.getResponseCode();if(coverCode==404)return null;if(coverCode!=200)throw new IOException("画像 HTTP "+coverCode);
-      String type=cover.getContentType();if(type==null||!type.toLowerCase(Locale.ROOT).startsWith("image/"))return null;
-      byte[] bytes=Dav.read(cover.getInputStream(),1024*1024);
-      BitmapFactory.Options opts=new BitmapFactory.Options();opts.inJustDecodeBounds=true;BitmapFactory.decodeByteArray(bytes,0,bytes.length,opts);
-      if(opts.outWidth<2||opts.outHeight<2||opts.outWidth>5000||opts.outHeight>5000)return null;
-      opts.inSampleSize=1;while(opts.outWidth/opts.inSampleSize>160||opts.outHeight/opts.inSampleSize>220)opts.inSampleSize*=2;
-      opts.inJustDecodeBounds=false;Bitmap bitmap=BitmapFactory.decodeByteArray(bytes,0,bytes.length,opts);if(bitmap==null)return null;
-      String cc=cover.getHeaderField("Cache-Control");long expires=cover.getHeaderFieldDate("Expires",0);
-      // Only retain when explicitly permitted for at least our seven-day limit.
-      if((cc==null||!cc.toLowerCase(Locale.ROOT).matches(".*(no-store|no-cache|must-revalidate|max-age|s-maxage).*" ))&&expires>=now+TTL){
-        File tmp=new File(dir,file.getName()+".tmp");try(FileOutputStream out=new FileOutputStream(tmp)){bitmap.compress(Bitmap.CompressFormat.JPEG,85,out);}if(!tmp.renameTo(file))tmp.delete();trim(dir);
-      }
-      return bitmap;
-    }finally{cover.disconnect();}
+    URL target=new URL("https://covers.openlibrary.org/b/id/"+coverId+"-M.jpg?default=false");
+    boolean storable=true;
+    for(int redirects=0;redirects<=5;redirects++){
+      if(!CoverHttpPolicy.allowed(target))throw new IOException("許可されていない転送先");
+      HttpURLConnection cover=request(target.toExternalForm());
+      try{
+        int code=cover.getResponseCode();String cc=cover.getHeaderField("Cache-Control");
+        if(cc!=null&&cc.toLowerCase(Locale.ROOT).matches(".*(?:no-store|no-cache|private).*"))storable=false;
+        if(code==301||code==302||code==303||code==307||code==308){
+          String location=cover.getHeaderField("Location");if(location==null)throw new IOException("画像の転送先がありません");
+          target=new URL(target,location);continue;
+        }
+        if(code==404)return null;if(code!=200)throw new IOException("画像 HTTP "+code);
+        String type=cover.getContentType();if(type==null||!type.toLowerCase(Locale.ROOT).startsWith("image/"))return null;
+        byte[] bytes=Dav.read(cover.getInputStream(),1024*1024);
+        BitmapFactory.Options opts=new BitmapFactory.Options();opts.inJustDecodeBounds=true;BitmapFactory.decodeByteArray(bytes,0,bytes.length,opts);
+        if(opts.outWidth<2||opts.outHeight<2||opts.outWidth>5000||opts.outHeight>5000)return null;
+        opts.inSampleSize=1;while(opts.outWidth/opts.inSampleSize>160||opts.outHeight/opts.inSampleSize>220)opts.inSampleSize*=2;
+        opts.inJustDecodeBounds=false;Bitmap bitmap=BitmapFactory.decodeByteArray(bytes,0,bytes.length,opts);if(bitmap==null)return null;
+        long fetched=System.currentTimeMillis();long fresh=CoverHttpPolicy.freshnessMillis(cc,cover.getHeaderField("Age"),cover.getHeaderFieldDate("Expires",0),cover.getHeaderFieldDate("Date",0),fetched,TTL);
+        if(storable && fresh>0){
+          File file=new File(dir,prefix+(fetched+fresh)+".jpg"),tmp=new File(dir,prefix+"tmp");
+          try(FileOutputStream out=new FileOutputStream(tmp)){bitmap.compress(Bitmap.CompressFormat.JPEG,85,out);}if(!tmp.renameTo(file))tmp.delete();trim(dir);
+        }
+        return bitmap;
+      }finally{cover.disconnect();}
+    }
+    throw new IOException("画像の転送回数が多すぎます");
   }
   private static void trim(File dir){
     File[] files=dir.listFiles((d,n)->n.endsWith(".jpg"));if(files==null)return;
