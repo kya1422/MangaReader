@@ -33,15 +33,17 @@ final class FolderCovers {
       }catch(NumberFormatException ignored){}hit.delete();
     }
     if(title.trim().isEmpty())return null;
-    throttle();String query=URLEncoder.encode(title+" 1 manga","UTF-8");
-    HttpURLConnection search=request("https://openlibrary.org/search.json?q="+query+"&limit=10&fields=title,cover_i");
     long coverId=0;
-    try{
-      int searchCode=search.getResponseCode();if(searchCode!=200)throw new IOException("検索 HTTP "+searchCode);
-      JSONObject result=new JSONObject(new String(Dav.read(search.getInputStream(),512*1024),StandardCharsets.UTF_8));
-      JSONArray docs=result.optJSONArray("docs");if(docs==null)return null;
-      for(int i=0;i<docs.length();i++){JSONObject doc=docs.optJSONObject(i);if(doc==null)continue;long id=doc.optLong("cover_i",0);if(id>0&&CoverMatch.matchesFirstVolume(title,doc.optString("title",""))){coverId=id;break;}}
-    }finally{search.disconnect();}
+    for(int attempt=0;attempt<2 && coverId==0;attempt++){
+      throttle();String query=URLEncoder.encode(title+(attempt==0?" 1 manga":" 1"),"UTF-8");
+      HttpURLConnection search=request("https://openlibrary.org/search.json?q="+query+"&limit=10&fields=title,cover_i");
+      try{
+        int searchCode=search.getResponseCode();if(searchCode!=200)throw new IOException("検索 HTTP "+searchCode);
+        JSONObject result=new JSONObject(new String(Dav.read(search.getInputStream(),512*1024),StandardCharsets.UTF_8));
+        JSONArray docs=result.optJSONArray("docs");if(docs==null)continue;
+        for(int i=0;i<docs.length();i++){JSONObject doc=docs.optJSONObject(i);if(doc==null)continue;long id=doc.optLong("cover_i",0);if(id>0&&CoverMatch.matchesFirstVolume(title,doc.optString("title",""))){coverId=id;break;}}
+      }finally{search.disconnect();}
+    }
     if(coverId==0)return null;
     URL target=new URL("https://covers.openlibrary.org/b/id/"+coverId+"-M.jpg?default=false");
     boolean storable=true;

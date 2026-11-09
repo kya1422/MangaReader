@@ -96,8 +96,11 @@ public class MainActivity extends Activity {
     for(JSONObject o:entries){String url=o.optString("url"),name=o.optString("name");
       TextView row=entry(clean(name),clean(o.optString("folderName"))+"  "+(o.optBoolean("finished")?"既読":"途中"));list.addView(row);
       row.setOnClickListener(v->new AlertDialog.Builder(this).setTitle("履歴を削除しますか？")
-        .setMessage(clean(name)+"\n\n読書位置、既読状態、見開き設定を削除します。漫画ファイル自体は削除しません。")
-        .setNegativeButton("キャンセル",null).setPositiveButton("履歴を削除",(d,w)->{all.remove(url);prefs.edit().putString("records",all.toString()).apply();history();}).show());
+        .setMessage(clean(name)+"\n\n読書位置・既読状態・見開き設定と、端末に保存したこの本のZIPを削除します。保存中の場合は中止します。WebDAV上の元ファイルは削除しません。")
+        .setNegativeButton("キャンセル",null).setPositiveButton("削除",(d,w)->{
+          if(!DownloadCache.delete(this,url)){message("端末内ファイルを削除できませんでした。履歴は残しています。");return;}
+          all.remove(url);prefs.edit().putString("records",all.toString()).apply();history();
+        }).show());
     }
   }
   void checkUpdate(){
