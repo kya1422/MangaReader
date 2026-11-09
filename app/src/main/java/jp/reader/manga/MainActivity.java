@@ -74,7 +74,7 @@ public class MainActivity extends Activity {
   JSONObject records(){if(recordCache==null){try{recordCache=new JSONObject(prefs.getString("records","{}"));}catch(Exception e){recordCache=new JSONObject();}}return recordCache;}
   void put(String key,JSONObject value){try{JSONObject all=records();all.put(key,value);prefs.edit().putString("records",all.toString()).apply();}catch(Exception e){message(e.toString());}}
   JSONObject record(String key){JSONObject j=records().optJSONObject(key);return j==null?new JSONObject():j;}
-  String clean(String s){return s.replaceFirst("^\\s*\\([^)]*\\)\\s*","").replaceFirst("^\\s*\\[[^]]*\\]\\s*","").replaceFirst("(?i)\\.(zip|cbz)$","").trim();}
+  String clean(String s){return TitleSort.displayTitle(s);}
   String author(String s){java.util.regex.Matcher m=java.util.regex.Pattern.compile("\\[([^]]+)\\]").matcher(s);return m.find()?m.group(1):"";}
   void home(){screen="home";folders.clear();DownloadCache.pin(null);reading=false;zip=null;clear();release();root.addView(text("漫画リーダー",25));LinearLayout bar=new LinearLayout(this);bar.addView(button("フォルダ",()->browse(prefs.getString("url",""),"フォルダ")));bar.addView(button("接続設定",this::settings));root.addView(bar);LinearLayout list=scroll();JSONObject all=records();ArrayList<JSONObject> recent=new ArrayList<>();Iterator<String> keys=all.keys();while(keys.hasNext()){JSONObject o=all.optJSONObject(keys.next());if(o!=null&&!o.optBoolean("finished"))recent.add(o);}recent.sort((a,b)->Long.compare(b.optLong("time"),a.optLong("time")));
     list.addView(text("最近読んだ本",21));if(recent.isEmpty())list.addView(text("読みかけの本はありません",14));for(JSONObject o:recent){String name=o.optString("name"),url=o.optString("url"),fu=o.optString("folder"),fn=o.optString("folderName");TextView v=entry(clean(name),author(name)+"  途中 "+(o.optInt("page")+1)+" / "+o.optInt("total"));list.addView(v);v.setOnClickListener(w->openBook(url,name,fu,fn));}
@@ -147,12 +147,13 @@ public class MainActivity extends Activity {
     ArrayList<Dav.Item> loaded=new ArrayList<>();boolean[] ready={false};
     Runnable refresh=()->{
       boolean descending=prefs.getBoolean("browse_descending",false);
-      order.setText(descending?"名前順 ↓":"名前順 ↑");
+      order.setText(descending?"作品名順 ↓":"作品名順 ↑");
       if(!ready[0])return;
       coverSerial++;final int serial=coverSerial;visibleCoverChecks.clear();list.removeAllViews();
       ArrayList<Dav.Item> visible=new ArrayList<>();
       for(Dav.Item item:loaded)if(BrowseSearch.matches(item.name,item.dir,query.getText().toString()))visible.add(item);
-      visible.sort((a,b)->{if(a.dir!=b.dir)return a.dir?-1:1;return descending?RemoteZip.natural(b.name,a.name):RemoteZip.natural(a.name,b.name);});
+      TitleSort titleSort=new TitleSort();
+      visible.sort((a,b)->{if(a.dir!=b.dir)return a.dir?-1:1;return descending?titleSort.compare(b.name,a.name):titleSort.compare(a.name,b.name);});
       for(Dav.Item item:visible){
         JSONObject rec=record(item.url);String sub=item.dir?"フォルダ":rec.length()==0?"未読":rec.optBoolean("finished")?"既読":"途中  "+(rec.optInt("page")+1)+" / "+rec.optInt("total");
         TextView v=entry(clean(item.name),author(item.name)+"  "+sub);
