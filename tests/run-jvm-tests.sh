@@ -14,3 +14,6 @@ java -Dfile.encoding=UTF-8 -cp "$tmp/spread" jp.reader.manga.TestSpread
 mkdir -p "$tmp/ocr"
 javac -encoding UTF-8 -d "$tmp/ocr" tests/ocr/src/jp/reader/manga/TestOcrInference.java app/src/main/java/jp/reader/manga/OcrSpreadInference.java
 java -Dfile.encoding=UTF-8 -cp "$tmp/ocr" jp.reader.manga.TestOcrInference
+mkdir -p "$tmp/geometry"
+javac -encoding UTF-8 -d "$tmp/geometry" tests/geometry/src/jp/reader/manga/TestGeometry.java app/src/main/java/jp/reader/manga/SpreadGeometry.java
+java -Dfile.encoding=UTF-8 -cp "$tmp/geometry" jp.reader.manga.TestGeometry

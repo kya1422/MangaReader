@@ -198,10 +198,9 @@ public class MainActivity extends Activity {
     int width=getResources().getDisplayMetrics().widthPixels,height=getResources().getDisplayMetrics().heightPixels;
     async(()->{Bitmap a=current.bitmap(requested,width,height);Bitmap b=null;int n=requested+1;if(!current.isWide(requested)&&n<current.pages.size()&&!anchors.contains(n)){try{b=current.bitmap(n,width,height);}catch(Exception e){a.recycle();throw e;}if(!current.isWide(n))n++;else{b.recycle();b=null;}}return new Spread(a,b,n);},s->{
       release();right=s.a;left=s.b;next=s.next;status.setText((page+1)+(next>page+1?"–"+next:"")+" / "+zip.pages.size());
-      if(left!=null){
-        addPageImage(images,leftToRightSpread?right:left);
-        addPageImage(images,leftToRightSpread?left:right);
-      }else addPageImage(images,right);
+      Bitmap pageOnLeft=left==null?null:(leftToRightSpread?right:left);
+      Bitmap pageOnRight=left==null?right:(leftToRightSpread?left:right);
+      images.addView(new SpreadView(this,pageOnLeft,pageOnRight),new LinearLayout.LayoutParams(-1,-1));
       images.setOnTouchListener(new View.OnTouchListener(){float x;public boolean onTouch(View v,android.view.MotionEvent e){
         if(e.getAction()==android.view.MotionEvent.ACTION_DOWN){x=e.getX();return true;}
         if(e.getAction()==android.view.MotionEvent.ACTION_UP){float delta=e.getX()-x;if(Math.abs(delta)>70){if(delta>0)forward();else backPage();}
@@ -265,10 +264,6 @@ public class MainActivity extends Activity {
         });
       }catch(Exception e){updatePrefetchStatus(currentUrl,"次巻の先読みを開始できませんでした");}
     });
-  }
-  void addPageImage(LinearLayout container,Bitmap image){
-    ImageView v=new ImageView(this);v.setImageBitmap(image);v.setScaleType(ImageView.ScaleType.FIT_CENTER);
-    container.addView(v,new LinearLayout.LayoutParams(0,-1,1));
   }
   void jumpToPage(int target){
     if(zip==null)return;
