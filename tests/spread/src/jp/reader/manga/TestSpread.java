@@ -11,6 +11,9 @@ class TestSpread {
    check(SpreadPlanner.containing(5,wide.length,cuts,o)==5,"wide double-page single");
    check(SpreadPlanner.containing(7,wide.length,cuts,o)==6,"spread after wide page");
    cuts.add(2);check(SpreadPlanner.containing(1,wide.length,cuts,o)==1 && SpreadPlanner.containing(2,wide.length,cuts,o)==2 && SpreadPlanner.containing(3,wide.length,cuts,o)==2,"adjustment starts at chosen boundary");
+   Set<Integer> prevCut=new HashSet<>();prevCut.add(3);
+   boolean[] portrait=new boolean[8];
+   check(SpreadPlanner.containing(4,8,prevCut,i->portrait[i])==3 && SpreadPlanner.containing(5,8,prevCut,i->portrait[i])==5,"previous page joins current after adjustment");
    Random random=new Random(7);
    for(int test=0;test<1000;test++){
      boolean[] dimensions=new boolean[1+random.nextInt(100)];Set<Integer> boundaries=new HashSet<>();

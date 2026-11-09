@@ -203,14 +203,11 @@ public class MainActivity extends Activity {
     controls.setOnApplyWindowInsetsListener((view,insets)->{view.setPadding(insets.getSystemWindowInsetLeft(),insets.getSystemWindowInsetTop(),insets.getSystemWindowInsetRight(),0);return insets;});
     LinearLayout bar=new LinearLayout(this);
     bar.addView(button("← ホーム",this::home));
-    bar.addView(button("見開き調整",()->new AlertDialog.Builder(this).setTitle("見開き調整").setItems(new String[]{"このページの次から1ページずらす","この本の調整をすべて解除"},(d,n)->{if(n==0 && page+1<zip.pages.size())cuts.add(page+1);else if(n==1)cuts.clear();previous.clear();render();}).show()));
+    bar.addView(button("見開き調整",()->new AlertDialog.Builder(this).setTitle("見開き調整").setItems(new String[]{"前のページから組み合わせをずらす","この本の調整をすべて解除"},(d,n)->{if(n==0)adjustFromPrevious();else {cuts.clear();previous.clear();jumpToPage(page);}}).show()));
     bar.addView(button("見開き左右",()->new AlertDialog.Builder(this).setTitle("見開きの表示順")
       .setSingleChoiceItems(new String[]{"右開き（先のページが右）","左開き（先のページが左）"},leftToRightSpread?1:0,(dialog,choice)->{
         leftToRightSpread=choice==1;save();dialog.dismiss();render();
       }).setNegativeButton("キャンセル",null).show()));
-    bar.addView(button("自動判定",()->new AlertDialog.Builder(this).setTitle("見開きを自動判定")
-      .setMessage("現在のページから最大50ページの下の端を端末内でOCR解析します。時間やメモリーを使い、ページ番号がない場合は判定できません。結果は確認後に適用します。\n\nGoogle ML Kitを使用します。画像と読み取り結果は端末内で処理されますが、Googleによる利用状況・性能の測定情報の送信が行われる場合があります。")
-      .setNegativeButton("キャンセル",null).setPositiveButton("解析する",(dialog,which)->startSpreadDetection()).show()));
     controls.addView(bar);
     controls.addView(button("文字・線の濃さ",()->new AlertDialog.Builder(this).setTitle("文字・線の濃さ（全ての本に適用）")
       .setSingleChoiceItems(new String[]{"標準（処理なし）","弱","強"},prefs.getInt("ink_strength",0),(dialog,choice)->{
@@ -253,35 +250,18 @@ public class MainActivity extends Activity {
       save();maybePrefetch();
     });
   }
-  void startSpreadDetection(){
+  void adjustFromPrevious(){
     if(zip==null)return;
-    final RemoteZip current=zip;final int start=page;final TreeSet<Integer> anchors=new TreeSet<>(cuts);
-    controlsVisible=false;clear();release();loadingBars();
-    root.addView(button("← 読書に戻る",()->{controlsVisible=false;render();}));
-    TextView info=text("ページ番号を解析しています…",20);root.addView(info);
-    final int id=generation;
-    async(()->OcrSpreadDetector.scan(current,start,anchors,new OcrSpreadDetector.Progress(){
-      public boolean cancelled(){return generation!=id || Thread.currentThread().isInterrupted();}
-      public void page(int done,int total){ui.post(()->{if(generation==id)info.setText("ページ番号を解析中: "+done+" / "+total);});}
-    }),result->{
-      if(!result.reliable){
-        String hint=result.tentative==null?"参考候補はありません。":"参考候補（非常に不確か）: "+(result.tentative?"左開き":"右開き")+"\n観測が少ないか矛盾しているため、この候補は正しくない可能性があります。";
-        new AlertDialog.Builder(this).setTitle("十分に判定できませんでした")
-          .setMessage("検出: "+result.observations+" ページ\n"+hint+"\n\n見開きのずれは判定できません。設定は変更していません。必要なら読書画面で手動調整してください。")
-          .setPositiveButton("戻る",(d,w)->render()).setOnCancelListener(d->render()).show();return;
-      }
-      String direction=result.leftToRight?"左開き（先のページが左）":"右開き（先のページが右）";
-      String alignment=result.toggleBreak==null?"ページのずれ: 判定できませんでした（変更しません）":result.toggleBreak?"ページのずれ: このページの次の調整を切り替える":"ページのずれ: 現在の調整のまま";
-      new AlertDialog.Builder(this).setTitle("判定候補")
-        .setMessage("表示順: "+direction+"\n"+alignment+"\n読み取ったページ番号: "+result.observations+" 件\n\n推定は間違う場合があります。適用しますか？")
-        .setNegativeButton("適用しない",(d,w)->render())
-        .setPositiveButton("適用",(d,w)->{
-          leftToRightSpread=result.leftToRight;
-          if(Boolean.TRUE.equals(result.toggleBreak) && start+1<current.pages.size()){
-            if(!cuts.add(start+1))cuts.remove(start+1);
-          }
-          previous.clear();save();render();
-        }).setOnCancelListener(d->render()).show();
+    if(page<=0){message("前のページがないため調整できません");return;}
+    final RemoteZip current=zip;final int target=page;final int boundary=target-1;
+    final TreeSet<Integer> updated=new TreeSet<>(cuts);
+    if(!updated.add(boundary))updated.remove(boundary);
+    async(()->{
+      if(current.isWide(boundary)||current.isWide(target))return -1;
+      return SpreadPlanner.containing(target,current.pages.size(),updated,current::isWide);
+    },start->{
+      if(start!=boundary){message("前のページと見開きにできません。横長ページや他の調整をご確認ください。");return;}
+      cuts.clear();cuts.addAll(updated);previous.clear();page=start;next=0;save();render();
     });
   }
   void updatePrefetchStatus(String expectedUrl,String status){
