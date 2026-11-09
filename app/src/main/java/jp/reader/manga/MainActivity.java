@@ -117,7 +117,7 @@ public class MainActivity extends Activity {
     screen="browse";DownloadCache.pin(null);reading=false;clear();release();
     root.addView(button("← ホーム",this::home));root.addView(text(clean(name),23));
     LinearLayout searchBar=new LinearLayout(this);
-    EditText query=new EditText(this);query.setSingleLine();query.setHint("このフォルダ内を検索");
+    EditText query=new EditText(this);query.setSingleLine();query.setHint("フォルダ名を検索");
     searchBar.addView(query,new LinearLayout.LayoutParams(0,-2,1));
     Button order=new Button(this);order.setAllCaps(false);searchBar.addView(order);root.addView(searchBar);
     LinearLayout list=scroll();TextView status=text("読み込み中…",16);list.addView(status);
@@ -128,7 +128,7 @@ public class MainActivity extends Activity {
       if(!ready[0])return;
       list.removeAllViews();
       ArrayList<Dav.Item> visible=new ArrayList<>();
-      for(Dav.Item item:loaded)if(BrowseSearch.matches(item.name,query.getText().toString()))visible.add(item);
+      for(Dav.Item item:loaded)if(BrowseSearch.matches(item.name,item.dir,query.getText().toString()))visible.add(item);
       visible.sort((a,b)->{if(a.dir!=b.dir)return a.dir?-1:1;return descending?RemoteZip.natural(b.name,a.name):RemoteZip.natural(a.name,b.name);});
       for(Dav.Item item:visible){
         JSONObject rec=record(item.url);String sub=item.dir?"フォルダ":rec.length()==0?"未読":rec.optBoolean("finished")?"既読":"途中  "+(rec.optInt("page")+1)+" / "+rec.optInt("total");

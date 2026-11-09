@@ -8,7 +8,8 @@ final class BrowseSearch {
   private static String normalize(String value){
     return Normalizer.normalize(value,Normalizer.Form.NFKC).toLowerCase(Locale.ROOT);
   }
-  static boolean matches(String name,String query){
-    return normalize(name).contains(normalize(query.trim()));
+  static boolean matches(String name,boolean isDirectory,String query){
+    String q=normalize(query.trim());
+    return q.isEmpty() || (isDirectory && normalize(name).contains(q));
   }
 }
