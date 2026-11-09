@@ -33,7 +33,7 @@ final class FolderCovers {
     HttpURLConnection search=request("https://openlibrary.org/search.json?q="+query+"&limit=10&fields=title,cover_i");
     long coverId=0;
     try{
-      if(search.getResponseCode()!=200)return null;
+      int searchCode=search.getResponseCode();if(searchCode!=200)throw new IOException("検索 HTTP "+searchCode);
       JSONObject result=new JSONObject(new String(Dav.read(search.getInputStream(),512*1024),StandardCharsets.UTF_8));
       JSONArray docs=result.optJSONArray("docs");if(docs==null)return null;
       for(int i=0;i<docs.length();i++){JSONObject doc=docs.optJSONObject(i);if(doc==null)continue;long id=doc.optLong("cover_i",0);if(id>0&&CoverMatch.matchesFirstVolume(title,doc.optString("title",""))){coverId=id;break;}}
@@ -41,7 +41,7 @@ final class FolderCovers {
     if(coverId==0)return null;
     HttpURLConnection cover=request("https://covers.openlibrary.org/b/id/"+coverId+"-M.jpg?default=false");
     try{
-      if(cover.getResponseCode()!=200)return null;
+      int coverCode=cover.getResponseCode();if(coverCode==404)return null;if(coverCode!=200)throw new IOException("画像 HTTP "+coverCode);
       String type=cover.getContentType();if(type==null||!type.toLowerCase(Locale.ROOT).startsWith("image/"))return null;
       byte[] bytes=Dav.read(cover.getInputStream(),1024*1024);
       BitmapFactory.Options opts=new BitmapFactory.Options();opts.inJustDecodeBounds=true;BitmapFactory.decodeByteArray(bytes,0,bytes.length,opts);

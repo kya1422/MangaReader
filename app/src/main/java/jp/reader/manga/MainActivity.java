@@ -137,6 +137,7 @@ public class MainActivity extends Activity {
         .setNegativeButton("キャンセル",null).setPositiveButton("オンにする",(d,w)->{prefs.edit().putBoolean("covers_enabled",true).apply();browse(url,name);}).show();
     });
     coverScroll.setOnScrollChangeListener((v,x,y,oldX,oldY)->checkCovers.run());
+    coverScroll.getViewTreeObserver().addOnGlobalLayoutListener(()->checkCovers.run());
     ArrayList<Dav.Item> loaded=new ArrayList<>();boolean[] ready={false};
     Runnable refresh=()->{
       boolean descending=prefs.getBoolean("browse_descending",false);
@@ -153,7 +154,11 @@ public class MainActivity extends Activity {
         if(item.dir){
           ImageView cover=new ImageView(this);cover.setScaleType(ImageView.ScaleType.FIT_CENTER);
           int density=(int)(getResources().getDisplayMetrics().density*100);
-          row.addView(cover,new LinearLayout.LayoutParams(72*density/100,96*density/100));
+          FrameLayout coverFrame=new FrameLayout(this);
+          coverFrame.addView(cover,new FrameLayout.LayoutParams(-1,-1));
+          TextView coverStatus=new TextView(this);coverStatus.setTextSize(10);coverStatus.setTextColor(0xff555555);coverStatus.setGravity(Gravity.CENTER);
+          coverFrame.addView(coverStatus,new FrameLayout.LayoutParams(-1,-1));
+          row.addView(coverFrame,new LinearLayout.LayoutParams(72*density/100,96*density/100));
           boolean[] pending={false},failed={false};
           visibleCoverChecks.add(()->{
             if(serial!=coverSerial)return;
@@ -161,13 +166,15 @@ public class MainActivity extends Activity {
             boolean rowVisible=prefs.getBoolean("covers_enabled",false)&&row.isShown()&&row.getGlobalVisibleRect(rect);
             if(!rowVisible){cover.setImageDrawable(null);return;}
             if(pending[0]||failed[0]||cover.getDrawable()!=null)return;
-            pending[0]=true;String title=clean(item.name);
-            coverWorker.execute(()->{Bitmap image=null;try{if(serial==coverSerial)image=FolderCovers.load(getApplicationContext(),item.url,title);}catch(Exception ignored){}
-              final Bitmap result=image;
+            pending[0]=true;coverStatus.setText("取得中…");String title=clean(item.name);
+            coverWorker.execute(()->{Bitmap image=null;String error=null;
+              try{if(serial==coverSerial)image=FolderCovers.load(getApplicationContext(),item.url,title);}
+              catch(Exception e){error=e.getMessage();if(error==null||error.isEmpty())error="通信エラー";}
+              final Bitmap result=image;final String failure=error;
               ui.post(()->{
                 pending[0]=false;if(serial!=coverSerial)return;
-                if(result==null){failed[0]=true;return;}
-                android.graphics.Rect r=new android.graphics.Rect();if(row.isShown()&&row.getGlobalVisibleRect(r))cover.setImageBitmap(result);
+                if(result==null){failed[0]=true;coverStatus.setText(failure==null?"画像なし":failure);return;}
+                coverStatus.setText("");android.graphics.Rect r=new android.graphics.Rect();if(row.isShown()&&row.getGlobalVisibleRect(r))cover.setImageBitmap(result);
               });
             });
           });
