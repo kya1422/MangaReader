@@ -173,6 +173,9 @@ public class MainActivity extends Activity {
       .setSingleChoiceItems(new String[]{"右開き（先のページが右）","左開き（先のページが左）"},leftToRightSpread?1:0,(dialog,choice)->{
         leftToRightSpread=choice==1;save();dialog.dismiss();render();
       }).setNegativeButton("キャンセル",null).show()));
+    bar.addView(button("自動判定",()->new AlertDialog.Builder(this).setTitle("見開きを自動判定")
+      .setMessage("現在のページから最大12ページの下の端を端末内でOCR解析します。時間やメモリーを使い、ページ番号がない場合は判定できません。結果は確認後に適用します。\n\nGoogle ML Kitを使用します。画像と読み取り結果は端末内で処理されますが、Googleによる利用状況・性能の測定情報の送信が行われる場合があります。")
+      .setNegativeButton("キャンセル",null).setPositiveButton("解析する",(dialog,which)->startSpreadDetection()).show()));
     controls.addView(bar);
     downloadLabel=text("端末への保存: "+downloadState,12);controls.addView(downloadLabel);prefetchLabel=text(prefetchStatus,12);if(!prefetchStatus.isEmpty())controls.addView(prefetchLabel);
     TextView status=text("読み込み中…",14);controls.addView(status);
@@ -206,6 +209,36 @@ public class MainActivity extends Activity {
           else {controlsVisible=!controlsVisible;systemBars(!controlsVisible);controls.setVisibility(controlsVisible?View.VISIBLE:View.GONE);seekPanel.setVisibility(controlsVisible?View.VISIBLE:View.GONE);if(controlsVisible)scheduleGallery(current,seek.getMax()-seek.getProgress(),strip,scroller,caption);else {clearThumbnail();strip.removeAllViews();}root.requestApplyInsets();controls.requestApplyInsets();seekPanel.requestApplyInsets();}
           return true;}return true;}});
       save();maybePrefetch();
+    });
+  }
+  void startSpreadDetection(){
+    if(zip==null)return;
+    final RemoteZip current=zip;final int start=page;final TreeSet<Integer> anchors=new TreeSet<>(cuts);
+    controlsVisible=false;clear();release();loadingBars();
+    root.addView(button("← 読書に戻る",()->{controlsVisible=false;render();}));
+    TextView info=text("ページ番号を解析しています…",20);root.addView(info);
+    final int id=generation;
+    async(()->OcrSpreadDetector.scan(current,start,anchors,new OcrSpreadDetector.Progress(){
+      public boolean cancelled(){return generation!=id || Thread.currentThread().isInterrupted();}
+      public void page(int done,int total){ui.post(()->{if(generation==id)info.setText("ページ番号を解析中: "+done+" / "+total);});}
+    }),result->{
+      if(!result.reliable){
+        new AlertDialog.Builder(this).setTitle("判定できませんでした")
+          .setMessage("ページ番号を十分に読み取れないか、左右の傾向が一致しませんでした（検出 "+result.observations+" ページ）。設定は変更していません。")
+          .setPositiveButton("戻る",(d,w)->render()).setOnCancelListener(d->render()).show();return;
+      }
+      String direction=result.leftToRight?"左開き（先のページが左）":"右開き（先のページが右）";
+      String alignment=result.toggleBreak==null?"ページのずれ: 判定できませんでした（変更しません）":result.toggleBreak?"ページのずれ: このページの次の調整を切り替える":"ページのずれ: 現在の調整のまま";
+      new AlertDialog.Builder(this).setTitle("判定候補")
+        .setMessage("表示順: "+direction+"\n"+alignment+"\n読み取ったページ番号: "+result.observations+" 件\n\n推定は間違う場合があります。適用しますか？")
+        .setNegativeButton("適用しない",(d,w)->render())
+        .setPositiveButton("適用",(d,w)->{
+          leftToRightSpread=result.leftToRight;
+          if(Boolean.TRUE.equals(result.toggleBreak) && start+1<current.pages.size()){
+            if(!cuts.add(start+1))cuts.remove(start+1);
+          }
+          previous.clear();save();render();
+        }).setOnCancelListener(d->render()).show();
     });
   }
   void updatePrefetchStatus(String expectedUrl,String status){
