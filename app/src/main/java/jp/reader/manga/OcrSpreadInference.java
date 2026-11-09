@@ -9,15 +9,16 @@ final class OcrSpreadInference {
     Observation(int index,int number,boolean left){this.index=index;this.number=number;this.left=left;}
   }
   static final class Result {
-    final boolean reliable,leftToRight; final Boolean toggleBreak; final int observations;
-    Result(boolean ok,boolean l,Boolean t,int n){reliable=ok;leftToRight=l;toggleBreak=t;observations=n;}
+    final boolean reliable,leftToRight; final Boolean toggleBreak; final int observations; final Boolean tentative;
+    Result(boolean ok,boolean l,Boolean t,int n){this(ok,l,t,n,null);}
+    Result(boolean ok,boolean l,Boolean t,int n,Boolean hint){reliable=ok;leftToRight=l;toggleBreak=t;observations=n;tentative=hint;}
   }
   static Result infer(List<Observation> observations,int start,int count,Set<Integer> cuts,Set<Integer> wide){
     int right=0,left=0;
     for(Observation o:observations){boolean odd=(o.number&1)==1;
       if((odd&&!o.left)||(!odd&&o.left))right++;else left++;}
     int n=right+left;
-    if(n<4 || Math.max(right,left)*4<n*3 || Math.abs(right-left)<2)return new Result(false,false,null,n);
+    if(n<4 || Math.max(right,left)*4<n*3 || Math.abs(right-left)<2)return new Result(false,left>right,null,n,left==right?null:Boolean.valueOf(left>right));
     boolean ltr=left>right;
     int[] normal=score(observations,start,count,cuts,wide,ltr,false);
     int[] changed=score(observations,start,count,cuts,wide,ltr,true);

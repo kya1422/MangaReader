@@ -224,8 +224,9 @@ public class MainActivity extends Activity {
       public void page(int done,int total){ui.post(()->{if(generation==id)info.setText("ページ番号を解析中: "+done+" / "+total);});}
     }),result->{
       if(!result.reliable){
-        new AlertDialog.Builder(this).setTitle("判定できませんでした")
-          .setMessage("ページ番号を十分に読み取れないか、左右の傾向が一致しませんでした（検出 "+result.observations+" ページ）。設定は変更していません。")
+        String hint=result.tentative==null?"参考候補はありません。":"参考候補（非常に不確か）: "+(result.tentative?"左開き":"右開き")+"\n観測が少ないか矛盾しているため、この候補は正しくない可能性があります。";
+        new AlertDialog.Builder(this).setTitle("十分に判定できませんでした")
+          .setMessage("検出: "+result.observations+" ページ\n"+hint+"\n\n見開きのずれは判定できません。設定は変更していません。必要なら読書画面で手動調整してください。")
           .setPositiveButton("戻る",(d,w)->render()).setOnCancelListener(d->render()).show();return;
       }
       String direction=result.leftToRight?"左開き（先のページが左）":"右開き（先のページが右）";

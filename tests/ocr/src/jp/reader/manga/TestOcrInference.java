@@ -14,7 +14,9 @@ class TestOcrInference {
   r=OcrSpreadInference.infer(obs,0,8,new HashSet<>(),new HashSet<>());
   ok(r.reliable&&r.leftToRight,"左開きの候補");
   r=OcrSpreadInference.infer(obs.subList(0,2),0,8,new HashSet<>(),new HashSet<>());
-  ok(!r.reliable,"情報不足時は推定しない");
+  ok(!r.reliable && Boolean.TRUE.equals(r.tentative),"情報不足時は参考候補のみ");
+  r=OcrSpreadInference.infer(Collections.emptyList(),0,8,new HashSet<>(),new HashSet<>());
+  ok(!r.reliable && r.tentative==null,"検出なしでは候補なし");
   obs.clear();for(int i=0;i<8;i++)obs.add(new OcrSpreadInference.Observation(i,i+1,false));
   r=OcrSpreadInference.infer(obs,0,8,new HashSet<>(),new HashSet<>());
   ok(!r.reliable,"矛盾する観測は推定しない");
