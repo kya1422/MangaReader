@@ -3,6 +3,9 @@ package jp.reader.manga;
 import android.content.Context;
 import android.graphics.Bitmap;
 import android.graphics.BitmapFactory;
+import android.graphics.Canvas;
+import android.graphics.Paint;
+import android.graphics.Rect;
 import java.io.*;
 import java.util.*;
 
@@ -13,7 +16,7 @@ final class FolderCovers {
   static Bitmap load(Context ctx,String folderUrl,Client client)throws Exception{
     File dir=new File(ctx.getFilesDir(),"folder-covers-webdav");
     if(!dir.exists()&&!dir.mkdirs())throw new IOException("表紙の保存先を作成できません");
-    File file=new File(dir,DownloadCache.id(folderUrl)+".jpg");
+    File file=new File(dir,"v2-"+DownloadCache.id(folderUrl)+".jpg");
     if(file.isFile()){
       Bitmap bitmap=BitmapFactory.decodeFile(file.getPath());
       if(bitmap!=null){file.setLastModified(System.currentTimeMillis());return bitmap;}
@@ -22,12 +25,15 @@ final class FolderCovers {
     Dav dav=client.get();Dav.Item first=FirstBook.find(dav.list(folderUrl));
     if(first==null)return null;
     RemoteZip zip=new RemoteZip(dav,first.url);
-    Bitmap decoded=zip.bitmap(0,160,220);
+    Bitmap decoded=zip.bitmap(0,320,220);
     Bitmap small=null;
     try{
-      float scale=Math.min(1f,Math.min(160f/decoded.getWidth(),220f/decoded.getHeight()));
-      int w=Math.max(1,Math.round(decoded.getWidth()*scale)),h=Math.max(1,Math.round(decoded.getHeight()*scale));
-      small=Bitmap.createScaledBitmap(decoded,w,h,true);
+      int cropWidth=CoverCrop.leftWidth(decoded.getWidth(),decoded.getHeight());
+      float scale=Math.min(1f,Math.min(160f/cropWidth,220f/decoded.getHeight()));
+      int w=Math.max(1,Math.round(cropWidth*scale)),h=Math.max(1,Math.round(decoded.getHeight()*scale));
+      small=Bitmap.createBitmap(w,h,Bitmap.Config.RGB_565);
+      Canvas canvas=new Canvas(small);
+      canvas.drawBitmap(decoded,new Rect(0,0,cropWidth,decoded.getHeight()),new Rect(0,0,w,h),new Paint(Paint.FILTER_BITMAP_FLAG));
       File temp=new File(dir,file.getName()+".tmp");
       try{
         try(FileOutputStream out=new FileOutputStream(temp)){if(!small.compress(Bitmap.CompressFormat.JPEG,85,out))throw new IOException("表紙画像を保存できません");}
@@ -36,7 +42,7 @@ final class FolderCovers {
       }finally{temp.delete();}
       return small;
     }catch(Exception e){if(small!=null)small.recycle();throw e;}
-    finally{if(decoded!=small || small==null)decoded.recycle();}
+    finally{decoded.recycle();}
   }
   private static void trim(File dir){
     File[] files=dir.listFiles((d,n)->n.endsWith(".jpg"));if(files==null)return;

@@ -23,3 +23,6 @@ java -Dfile.encoding=UTF-8 -cp "$tmp/http" jp.reader.manga.TestHttp
 mkdir -p "$tmp/browse"
 javac -encoding UTF-8 -d "$tmp/browse" tests/browse/src/jp/reader/manga/TestBrowse.java app/src/main/java/jp/reader/manga/BrowseSearch.java
 java -Dfile.encoding=UTF-8 -cp "$tmp/browse" jp.reader.manga.TestBrowse
+mkdir -p "$tmp/covercrop"
+javac -encoding UTF-8 -d "$tmp/covercrop" tests/covercrop/src/jp/reader/manga/TestCoverCrop.java app/src/main/java/jp/reader/manga/CoverCrop.java
+java -Dfile.encoding=UTF-8 -cp "$tmp/covercrop" jp.reader.manga.TestCoverCrop
