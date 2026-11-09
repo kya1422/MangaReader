@@ -4,7 +4,7 @@ cd "$(dirname "$0")/.."
 tmp="$(mktemp -d)"
 trap 'rm -rf "$tmp"' EXIT
 mkdir -p "$tmp/zip" "$tmp/cache"
-javac -encoding UTF-8 -d "$tmp/zip" $(find tests/zip/src -name '*.java') app/src/main/java/jp/reader/manga/RemoteZip.java app/src/main/java/jp/reader/manga/JpegHeader.java app/src/main/java/jp/reader/manga/PngHeader.java app/src/main/java/jp/reader/manga/ZipNames.java app/src/main/java/jp/reader/manga/NextBook.java app/src/main/java/jp/reader/manga/FirstBook.java
+javac -encoding UTF-8 -d "$tmp/zip" $(find tests/zip/src -name '*.java') app/src/main/java/jp/reader/manga/RemoteZip.java app/src/main/java/jp/reader/manga/JpegHeader.java app/src/main/java/jp/reader/manga/PngHeader.java app/src/main/java/jp/reader/manga/ZipNames.java app/src/main/java/jp/reader/manga/NextBook.java app/src/main/java/jp/reader/manga/FirstBook.java app/src/main/java/jp/reader/manga/NestedBook.java
 java -Dfile.encoding=UTF-8 -Djava.awt.headless=true -cp "$tmp/zip" jp.reader.manga.TestMain
 javac -encoding UTF-8 -d "$tmp/cache" $(find tests/cache/src -name '*.java') app/src/main/java/jp/reader/manga/DownloadCache.java app/src/main/java/jp/reader/manga/CachePolicy.java
 java -Dfile.encoding=UTF-8 -cp "$tmp/cache" jp.reader.manga.Test

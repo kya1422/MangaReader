@@ -13,7 +13,7 @@ import java.util.*;
 final class FolderCovers {
   interface Client {Dav get() throws Exception;}
   private static final long MAX_CACHE=10L*1024*1024;
-  static Bitmap load(Context ctx,String folderUrl,Client client)throws Exception{
+  static Bitmap load(Context ctx,String folderUrl,Client client,NestedBook.Cancel cancel)throws Exception{
     File dir=new File(ctx.getFilesDir(),"folder-covers-webdav");
     if(!dir.exists()&&!dir.mkdirs())throw new IOException("表紙の保存先を作成できません");
     File file=new File(dir,"v2-"+DownloadCache.id(folderUrl)+".jpg");
@@ -22,7 +22,7 @@ final class FolderCovers {
       if(bitmap!=null){file.setLastModified(System.currentTimeMillis());return bitmap;}
       file.delete();
     }
-    Dav dav=client.get();Dav.Item first=FirstBook.find(dav.list(folderUrl));
+    Dav dav=client.get();Dav.Item first=NestedBook.find(folderUrl,dav::list,cancel);
     if(first==null)return null;
     RemoteZip zip=new RemoteZip(dav,first.url);
     Bitmap decoded=zip.bitmap(0,320,220);

@@ -139,7 +139,7 @@ public class MainActivity extends Activity {
     coverToggle.setOnClickListener(v->{
       if(prefs.getBoolean("covers_enabled",false)){prefs.edit().putBoolean("covers_enabled",false).apply();browse(url,name);}
       else new AlertDialog.Builder(this).setTitle("WebDAVから表紙を取得")
-        .setMessage("各フォルダ内で名前順の最初のZIP/CBZから先頭ページを取得し、縮小して端末に保存します。漫画ZIPの先頭ページが表紙でない場合は別の画像になります。オンにしますか？")
+        .setMessage("各フォルダを探索し、最初のZIP/CBZから先頭ページを取得して、縮小し端末に保存します。直下になければ子フォルダを名前順に探します。漫画ZIPの先頭ページが表紙でない場合は別の画像になります。オンにしますか？")
         .setNegativeButton("キャンセル",null).setPositiveButton("オンにする",(d,w)->{prefs.edit().putBoolean("covers_enabled",true).apply();browse(url,name);}).show();
     });
     coverScroll.setOnScrollChangeListener((v,x,y,oldX,oldY)->checkCovers.run());
@@ -175,7 +175,7 @@ public class MainActivity extends Activity {
             if(pending[0]||failed[0]||cover.getDrawable()!=null)return;
             pending[0]=true;coverStatus.setText("取得中…");
             coverWorker.execute(()->{Bitmap image=null;String error=null;
-              try{if(serial==coverSerial)image=FolderCovers.load(getApplicationContext(),item.url,()->client());}
+              try{if(serial==coverSerial)image=FolderCovers.load(getApplicationContext(),item.url,()->client(),()->serial!=coverSerial || Thread.currentThread().isInterrupted());}
               catch(Exception e){error=e.getMessage();if(error==null||error.isEmpty())error="通信エラー";}
               final Bitmap result=image;final String failure=error;
               ui.post(()->{
