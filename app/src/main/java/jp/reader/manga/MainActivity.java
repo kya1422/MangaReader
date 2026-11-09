@@ -176,9 +176,15 @@ public class MainActivity extends Activity {
         leftToRightSpread=choice==1;save();dialog.dismiss();render();
       }).setNegativeButton("キャンセル",null).show()));
     bar.addView(button("自動判定",()->new AlertDialog.Builder(this).setTitle("見開きを自動判定")
-      .setMessage("現在のページから最大12ページの下の端を端末内でOCR解析します。時間やメモリーを使い、ページ番号がない場合は判定できません。結果は確認後に適用します。\n\nGoogle ML Kitを使用します。画像と読み取り結果は端末内で処理されますが、Googleによる利用状況・性能の測定情報の送信が行われる場合があります。")
+      .setMessage("現在のページから最大50ページの下の端を端末内でOCR解析します。時間やメモリーを使い、ページ番号がない場合は判定できません。結果は確認後に適用します。\n\nGoogle ML Kitを使用します。画像と読み取り結果は端末内で処理されますが、Googleによる利用状況・性能の測定情報の送信が行われる場合があります。")
       .setNegativeButton("キャンセル",null).setPositiveButton("解析する",(dialog,which)->startSpreadDetection()).show()));
     controls.addView(bar);
+    controls.addView(button("文字・線の濃さ",()->new AlertDialog.Builder(this).setTitle("文字・線の濃さ（全ての本に適用）")
+      .setSingleChoiceItems(new String[]{"標準（処理なし）","弱","強"},prefs.getInt("ink_strength",0),(dialog,choice)->{
+        prefs.edit().putInt("ink_strength",choice).apply();
+        if(images.getChildCount()>0 && images.getChildAt(0) instanceof SpreadView)((SpreadView)images.getChildAt(0)).setInkStrength(choice);
+        dialog.dismiss();
+      }).setNegativeButton("キャンセル",null).show()));
     downloadLabel=text("端末への保存: "+downloadState,12);controls.addView(downloadLabel);prefetchLabel=text(prefetchStatus,12);if(!prefetchStatus.isEmpty())controls.addView(prefetchLabel);
     TextView status=text("読み込み中…",14);controls.addView(status);
     frame.addView(controls,new FrameLayout.LayoutParams(-1,-2,Gravity.TOP));
@@ -202,7 +208,9 @@ public class MainActivity extends Activity {
       release();right=s.a;left=s.b;next=s.next;status.setText((page+1)+(next>page+1?"–"+next:"")+" / "+zip.pages.size());
       Bitmap pageOnLeft=left==null?null:(leftToRightSpread?right:left);
       Bitmap pageOnRight=left==null?right:(leftToRightSpread?left:right);
-      images.addView(new SpreadView(this,pageOnLeft,pageOnRight),new LinearLayout.LayoutParams(-1,-1));
+      SpreadView spreadView=new SpreadView(this,pageOnLeft,pageOnRight);
+      spreadView.setInkStrength(prefs.getInt("ink_strength",0));
+      images.addView(spreadView,new LinearLayout.LayoutParams(-1,-1));
       images.setOnTouchListener(new View.OnTouchListener(){float x;public boolean onTouch(View v,android.view.MotionEvent e){
         if(e.getAction()==android.view.MotionEvent.ACTION_DOWN){x=e.getX();return true;}
         if(e.getAction()==android.view.MotionEvent.ACTION_UP){float delta=e.getX()-x;if(Math.abs(delta)>70){if(delta>0)forward();else backPage();}
