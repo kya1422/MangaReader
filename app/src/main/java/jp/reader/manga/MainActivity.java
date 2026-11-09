@@ -104,26 +104,12 @@ public class MainActivity extends Activity {
       android.content.pm.PackageInfo installed=getPackageManager().getPackageInfo(getPackageName(),0);
       if(release.code<=Updater.version(installed)){new AlertDialog.Builder(this).setTitle("更新確認").setMessage("最新版を使用しています。\n現在: "+installed.versionName).setPositiveButton("OK",null).show();return;}
       new AlertDialog.Builder(this).setTitle("新しいバージョンがあります")
-        .setMessage(release.name+" をダウンロードしますか？\n署名を確認してからAndroidのインストール画面を開きます。")
-        .setNegativeButton("キャンセル",null).setPositiveButton("ダウンロード",(d,w)->{
-          message("更新ファイルをダウンロードしています…");
-          async(()->Updater.download(this,release),f->installUpdate());
+        .setMessage(release.name+" のGitHub Releaseページをブラウザで開きます。\nアプリ内から直接インストールは行いません。Play プロテクトが警告する場合はインストールを中止してください。")
+        .setNegativeButton("キャンセル",null).setPositiveButton("Releaseページを開く",(d,w)->{
+          try{startActivity(new Intent(Intent.ACTION_VIEW,android.net.Uri.parse(release.page)));}
+          catch(Exception e){message("ブラウザを開けません: "+e.getMessage());}
         }).show();
     });
-  }
-  void installUpdate(){
-    if(android.os.Build.VERSION.SDK_INT>=26 && !getPackageManager().canRequestPackageInstalls()){
-      new AlertDialog.Builder(this).setTitle("インストールの許可")
-        .setMessage("このアプリからのインストールを許可してください。設定後に戻り、もう一度「更新を確認」を押してください。")
-        .setNegativeButton("キャンセル",null).setPositiveButton("設定を開く",(d,w)->{
-          try{startActivity(new Intent(android.provider.Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES,android.net.Uri.parse("package:"+getPackageName())));}catch(Exception e){message("設定画面を開けません: "+e.getMessage());}
-        }).show();return;
-    }
-    try{
-      android.net.Uri uri=new android.net.Uri.Builder().scheme("content").authority(getPackageName()+".update").path(UpdateProvider.PATH).build();
-      Intent intent=new Intent(Intent.ACTION_VIEW).setDataAndType(uri,"application/vnd.android.package-archive").addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
-      intent.setClipData(android.content.ClipData.newRawUri("APK",uri));startActivity(intent);
-    }catch(Exception e){message("インストール画面を開けません: "+e.getMessage());}
   }
   Dav client() throws Exception{return new Dav(this,prefs.getString("url",""),prefs.getString("user",""),PasswordStore.read(prefs),prefs.getString("alias",""));}
   void browse(String url,String name){if(url.isEmpty()){settings();return;}screen="browse";DownloadCache.pin(null);reading=false;clear();release();root.addView(button("← ホーム",this::home));root.addView(text(clean(name),23));LinearLayout list=scroll();TextView status=text("読み込み中…",16);list.addView(status);async(()->{Dav d=client();return d.list(url);},items->{list.removeView(status);items.sort((a,b)->a.dir!=b.dir?(a.dir?-1:1):RemoteZip.natural(a.name,b.name));for(Dav.Item item:items){JSONObject rec=record(item.url);String sub=item.dir?"フォルダ":rec.length()==0?"未読":rec.optBoolean("finished")?"既読":"途中  "+(rec.optInt("page")+1)+" / "+rec.optInt("total");TextView v=entry(clean(item.name),author(item.name)+"  "+sub);list.addView(v);v.setOnClickListener(w->{if(item.dir){folders.push(new String[]{url,name});browse(item.url,item.name);}else openBook(item.url,item.name,url,name);});}if(items.isEmpty())list.addView(text("フォルダまたはZIPがありません",16));});}
