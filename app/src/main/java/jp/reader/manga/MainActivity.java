@@ -112,7 +112,40 @@ public class MainActivity extends Activity {
     });
   }
   Dav client() throws Exception{return new Dav(this,prefs.getString("url",""),prefs.getString("user",""),PasswordStore.read(prefs),prefs.getString("alias",""));}
-  void browse(String url,String name){if(url.isEmpty()){settings();return;}screen="browse";DownloadCache.pin(null);reading=false;clear();release();root.addView(button("← ホーム",this::home));root.addView(text(clean(name),23));LinearLayout list=scroll();TextView status=text("読み込み中…",16);list.addView(status);async(()->{Dav d=client();return d.list(url);},items->{list.removeView(status);items.sort((a,b)->a.dir!=b.dir?(a.dir?-1:1):RemoteZip.natural(a.name,b.name));for(Dav.Item item:items){JSONObject rec=record(item.url);String sub=item.dir?"フォルダ":rec.length()==0?"未読":rec.optBoolean("finished")?"既読":"途中  "+(rec.optInt("page")+1)+" / "+rec.optInt("total");TextView v=entry(clean(item.name),author(item.name)+"  "+sub);list.addView(v);v.setOnClickListener(w->{if(item.dir){folders.push(new String[]{url,name});browse(item.url,item.name);}else openBook(item.url,item.name,url,name);});}if(items.isEmpty())list.addView(text("フォルダまたはZIPがありません",16));});}
+  void browse(String url,String name){
+    if(url.isEmpty()){settings();return;}
+    screen="browse";DownloadCache.pin(null);reading=false;clear();release();
+    root.addView(button("← ホーム",this::home));root.addView(text(clean(name),23));
+    LinearLayout searchBar=new LinearLayout(this);
+    EditText query=new EditText(this);query.setSingleLine();query.setHint("このフォルダ内を検索");
+    searchBar.addView(query,new LinearLayout.LayoutParams(0,-2,1));
+    Button order=new Button(this);order.setAllCaps(false);searchBar.addView(order);root.addView(searchBar);
+    LinearLayout list=scroll();TextView status=text("読み込み中…",16);list.addView(status);
+    ArrayList<Dav.Item> loaded=new ArrayList<>();boolean[] ready={false};
+    Runnable refresh=()->{
+      boolean descending=prefs.getBoolean("browse_descending",false);
+      order.setText(descending?"名前順 ↓":"名前順 ↑");
+      if(!ready[0])return;
+      list.removeAllViews();
+      ArrayList<Dav.Item> visible=new ArrayList<>();
+      for(Dav.Item item:loaded)if(BrowseSearch.matches(item.name,query.getText().toString()))visible.add(item);
+      visible.sort((a,b)->{if(a.dir!=b.dir)return a.dir?-1:1;return descending?RemoteZip.natural(b.name,a.name):RemoteZip.natural(a.name,b.name);});
+      for(Dav.Item item:visible){
+        JSONObject rec=record(item.url);String sub=item.dir?"フォルダ":rec.length()==0?"未読":rec.optBoolean("finished")?"既読":"途中  "+(rec.optInt("page")+1)+" / "+rec.optInt("total");
+        TextView v=entry(clean(item.name),author(item.name)+"  "+sub);list.addView(v);
+        v.setOnClickListener(w->{if(item.dir){folders.push(new String[]{url,name});browse(item.url,item.name);}else openBook(item.url,item.name,url,name);});
+      }
+      if(visible.isEmpty())list.addView(text(loaded.isEmpty()?"フォルダまたはZIPがありません":"一致する項目がありません",16));
+    };
+    order.setOnClickListener(v->{prefs.edit().putBoolean("browse_descending",!prefs.getBoolean("browse_descending",false)).apply();refresh.run();});
+    query.addTextChangedListener(new android.text.TextWatcher(){
+      public void beforeTextChanged(CharSequence s,int start,int count,int after){}
+      public void onTextChanged(CharSequence s,int start,int before,int count){refresh.run();}
+      public void afterTextChanged(android.text.Editable e){}
+    });
+    refresh.run();
+    async(()->{Dav d=client();return d.list(url);},items->{loaded.addAll(items);ready[0]=true;refresh.run();});
+  }
   void openBook(String url,String name,String folder,String fname){screen="reader";DownloadCache.pin(url);bookUrl=url;bookName=name;folderUrl=folder;folderName=fname;reading=true;controlsVisible=false;prefetchRequested=false;prefetchStatus="";previous.clear();cuts.clear();JSONObject rec=record(url);leftToRightSpread=rec.optBoolean("leftToRightSpread",false);page=rec.optInt("page",0);JSONArray arr=rec.optJSONArray("cuts");if(arr!=null)for(int i=0;i<arr.length();i++)cuts.add(arr.optInt(i));clear();loadingBars();root.addView(button("← ホーム",this::home));root.addView(text("本を開いています…",20));downloadState="保存準備中";async(()->{Dav d=client();RemoteZip opened=new RemoteZip(d,url);DownloadCache.start(this,d,url,state->ui.post(()->{if(reading && url.equals(bookUrl)){downloadState=state;if(downloadLabel!=null)downloadLabel.setText("端末への保存: "+state);}}));return opened;},z->{zip=z;page=Math.max(0,Math.min(page,zip.pages.size()-1));render();});}
   void save(){if(zip==null)return;JSONObject o=record(bookUrl);try{o.put("url",bookUrl);o.put("name",bookName);o.put("folder",folderUrl);o.put("folderName",folderName);o.put("page",page);o.put("total",zip.pages.size());o.put("time",System.currentTimeMillis());if(!o.has("finished"))o.put("finished",false);o.put("leftToRightSpread",leftToRightSpread);JSONArray a=new JSONArray();for(int cut:cuts)a.put(cut);o.put("cuts",a);put(bookUrl,o);}catch(Exception ignored){}}
   void release(){if(right!=null){right.recycle();right=null;}if(left!=null){left.recycle();left=null;}}
