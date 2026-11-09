@@ -158,8 +158,8 @@ public class MainActivity extends Activity {
           visibleCoverChecks.add(()->{
             if(serial!=coverSerial)return;
             android.graphics.Rect rect=new android.graphics.Rect();
-            boolean visible=prefs.getBoolean("covers_enabled",false)&&row.isShown()&&row.getGlobalVisibleRect(rect);
-            if(!visible){cover.setImageDrawable(null);return;}
+            boolean rowVisible=prefs.getBoolean("covers_enabled",false)&&row.isShown()&&row.getGlobalVisibleRect(rect);
+            if(!rowVisible){cover.setImageDrawable(null);return;}
             if(pending[0]||failed[0]||cover.getDrawable()!=null)return;
             pending[0]=true;String title=clean(item.name);
             coverWorker.execute(()->{Bitmap image=null;try{if(serial==coverSerial)image=FolderCovers.load(getApplicationContext(),item.url,title);}catch(Exception ignored){}
