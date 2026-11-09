@@ -4,7 +4,7 @@ cd "$(dirname "$0")/.."
 tmp="$(mktemp -d)"
 trap 'rm -rf "$tmp"' EXIT
 mkdir -p "$tmp/zip" "$tmp/cache"
-javac -encoding UTF-8 -d "$tmp/zip" $(find tests/zip/src -name '*.java') app/src/main/java/jp/reader/manga/RemoteZip.java app/src/main/java/jp/reader/manga/JpegHeader.java app/src/main/java/jp/reader/manga/ZipNames.java app/src/main/java/jp/reader/manga/NextBook.java
+javac -encoding UTF-8 -d "$tmp/zip" $(find tests/zip/src -name '*.java') app/src/main/java/jp/reader/manga/RemoteZip.java app/src/main/java/jp/reader/manga/JpegHeader.java app/src/main/java/jp/reader/manga/ZipNames.java app/src/main/java/jp/reader/manga/NextBook.java app/src/main/java/jp/reader/manga/FirstBook.java
 java -Dfile.encoding=UTF-8 -Djava.awt.headless=true -cp "$tmp/zip" jp.reader.manga.TestMain
 javac -encoding UTF-8 -d "$tmp/cache" $(find tests/cache/src -name '*.java') app/src/main/java/jp/reader/manga/DownloadCache.java app/src/main/java/jp/reader/manga/CachePolicy.java
 java -Dfile.encoding=UTF-8 -cp "$tmp/cache" jp.reader.manga.Test
@@ -23,7 +23,3 @@ java -Dfile.encoding=UTF-8 -cp "$tmp/http" jp.reader.manga.TestHttp
 mkdir -p "$tmp/browse"
 javac -encoding UTF-8 -d "$tmp/browse" tests/browse/src/jp/reader/manga/TestBrowse.java app/src/main/java/jp/reader/manga/BrowseSearch.java
 java -Dfile.encoding=UTF-8 -cp "$tmp/browse" jp.reader.manga.TestBrowse
-mkdir -p "$tmp/covers"
-javac -encoding UTF-8 -d "$tmp/covers" tests/covers/src/jp/reader/manga/TestCoverMatch.java tests/covers/src/jp/reader/manga/TestCoverHttpPolicy.java app/src/main/java/jp/reader/manga/CoverMatch.java app/src/main/java/jp/reader/manga/CoverHttpPolicy.java
-java -Dfile.encoding=UTF-8 -cp "$tmp/covers" jp.reader.manga.TestCoverMatch
-java -Dfile.encoding=UTF-8 -cp "$tmp/covers" jp.reader.manga.TestCoverHttpPolicy

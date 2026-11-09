@@ -127,7 +127,10 @@ public class MainActivity extends Activity {
     Button order=new Button(this);order.setAllCaps(false);searchBar.addView(order);root.addView(searchBar);
     LinearLayout coverBar=new LinearLayout(this);
     Button coverToggle=button("",()->{});coverBar.addView(coverToggle);
-    TextView coverCredit=text("画像: Open Library",12);coverCredit.setOnClickListener(v->{try{startActivity(new Intent(Intent.ACTION_VIEW,android.net.Uri.parse("https://openlibrary.org/")));}catch(Exception ignored){}});coverBar.addView(coverCredit);root.addView(coverBar);
+    coverBar.addView(button("表紙を再取得",()->new AlertDialog.Builder(this).setTitle("表紙を再取得")
+      .setMessage("保存した表紙画像を削除し、表示中のフォルダから順次取得し直します。漫画ファイルや履歴は削除しません。")
+      .setNegativeButton("キャンセル",null).setPositiveButton("再取得",(d,w)->{coverSerial++;final int screenGeneration=generation;coverWorker.execute(()->{FolderCovers.clear(getApplicationContext());ui.post(()->{if(screenGeneration==generation && "browse".equals(screen))browse(url,name);});});}).show()));
+    root.addView(coverBar);
     LinearLayout list=scroll();ScrollView coverScroll=(ScrollView)list.getParent();
     TextView status=text("読み込み中…",16);list.addView(status);
     ArrayList<Runnable> visibleCoverChecks=new ArrayList<>();
@@ -135,8 +138,8 @@ public class MainActivity extends Activity {
     coverToggle.setText(prefs.getBoolean("covers_enabled",false)?"表紙: オン":"表紙: オフ");
     coverToggle.setOnClickListener(v->{
       if(prefs.getBoolean("covers_enabled",false)){prefs.edit().putBoolean("covers_enabled",false).apply();browse(url,name);}
-      else new AlertDialog.Builder(this).setTitle("ネットから表紙を取得")
-        .setMessage("表示中のフォルダ名をOpen Libraryに送信して、漫画の1巻の表紙を検索します。別作品や小説版が表示される場合があります。画像は小さくして許可される場合に最大7日間キャッシュします。オンにしますか？")
+      else new AlertDialog.Builder(this).setTitle("WebDAVから表紙を取得")
+        .setMessage("各フォルダ内で名前順の最初のZIP/CBZから先頭ページを取得し、縮小して端末に保存します。漫画ZIPの先頭ページが表紙でない場合は別の画像になります。オンにしますか？")
         .setNegativeButton("キャンセル",null).setPositiveButton("オンにする",(d,w)->{prefs.edit().putBoolean("covers_enabled",true).apply();browse(url,name);}).show();
     });
     coverScroll.setOnScrollChangeListener((v,x,y,oldX,oldY)->checkCovers.run());
@@ -169,9 +172,9 @@ public class MainActivity extends Activity {
             boolean rowVisible=prefs.getBoolean("covers_enabled",false)&&row.isShown()&&row.getGlobalVisibleRect(rect);
             if(!rowVisible){cover.setImageDrawable(null);return;}
             if(pending[0]||failed[0]||cover.getDrawable()!=null)return;
-            pending[0]=true;coverStatus.setText("取得中…");String title=clean(item.name);
+            pending[0]=true;coverStatus.setText("取得中…");
             coverWorker.execute(()->{Bitmap image=null;String error=null;
-              try{if(serial==coverSerial)image=FolderCovers.load(getApplicationContext(),item.url,title);}
+              try{if(serial==coverSerial)image=FolderCovers.load(getApplicationContext(),item.url,()->client());}
               catch(Exception e){error=e.getMessage();if(error==null||error.isEmpty())error="通信エラー";}
               final Bitmap result=image;final String failure=error;
               ui.post(()->{
