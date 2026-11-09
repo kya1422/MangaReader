@@ -16,7 +16,7 @@ import java.util.*;
 import java.util.concurrent.*;
 
 public class MainActivity extends Activity {
-  android.content.SharedPreferences prefs; ExecutorService worker=Executors.newSingleThreadExecutor(); Handler ui=new Handler(Looper.getMainLooper()); volatile int generation=0; LinearLayout root; Dav dav; RemoteZip zip; String bookUrl,bookName,folderUrl,folderName; int page=0,next=0; boolean reading=false; HashMap<Integer,Integer> previous=new HashMap<>(); TreeSet<Integer> cuts=new TreeSet<>(); Bitmap right,left; String alias=""; String downloadState=""; TextView downloadLabel; boolean controlsVisible=false; boolean leftToRightSpread=false; final ExecutorService thumbWorker=Executors.newSingleThreadExecutor(); final ArrayList<ImageView> thumbnailViews=new ArrayList<>(); final ArrayList<Bitmap> thumbnailBitmaps=new ArrayList<>(); volatile int previewSerial=0; Runnable previewPending; final ExecutorService prefetchWorker=Executors.newSingleThreadExecutor(); boolean prefetchRequested=false; String prefetchStatus=""; TextView prefetchLabel; JSONObject recordCache; String screen="home"; final ArrayDeque<String[]> folders=new ArrayDeque<>();
+  android.content.SharedPreferences prefs; ExecutorService worker=Executors.newFixedThreadPool(2); final ExecutorService browseWorker=Executors.newFixedThreadPool(2); Handler ui=new Handler(Looper.getMainLooper()); volatile int generation=0; LinearLayout root; Dav dav; RemoteZip zip; String bookUrl,bookName,folderUrl,folderName; int page=0,next=0; boolean reading=false; HashMap<Integer,Integer> previous=new HashMap<>(); TreeSet<Integer> cuts=new TreeSet<>(); Bitmap right,left; String alias=""; String downloadState=""; TextView downloadLabel; boolean controlsVisible=false; boolean leftToRightSpread=false; final ExecutorService thumbWorker=Executors.newSingleThreadExecutor(); final ArrayList<ImageView> thumbnailViews=new ArrayList<>(); final ArrayList<Bitmap> thumbnailBitmaps=new ArrayList<>(); volatile int previewSerial=0; Runnable previewPending; final ExecutorService prefetchWorker=Executors.newSingleThreadExecutor(); boolean prefetchRequested=false; String prefetchStatus=""; TextView prefetchLabel; JSONObject recordCache; String screen="home"; final ArrayDeque<String[]> folders=new ArrayDeque<>();
   final ExecutorService coverWorker=Executors.newSingleThreadExecutor(); volatile int coverSerial=0;
   interface Task<T>{T run() throws Exception;} interface Done<T>{void accept(T x) throws Exception;}
   public void onCreate(Bundle b){super.onCreate(b);prefs=getSharedPreferences("reader",MODE_PRIVATE);alias=prefs.getString("alias","");DownloadCache.cleanup(this);home();}
@@ -70,16 +70,23 @@ public class MainActivity extends Activity {
   Button button(String s,Runnable r){Button b=new Button(this);b.setText(s);b.setAllCaps(false);b.setOnClickListener(v->r.run());return b;}
   LinearLayout scroll(){ScrollView sv=new ScrollView(this);LinearLayout l=new LinearLayout(this);l.setOrientation(1);sv.addView(l);root.addView(sv,new LinearLayout.LayoutParams(-1,0,1));return l;}
   void message(String s){Toast.makeText(this,s,Toast.LENGTH_LONG).show();}
-  <T> void async(Task<T> task,Done<T> done){int id=generation;worker.execute(()->{try{T result=task.run();ui.post(()->{if(id!=generation){if(result instanceof Spread){Spread discarded=(Spread)result;discarded.a.recycle();if(discarded.b!=null)discarded.b.recycle();}return;}try{done.accept(result);}catch(Exception e){message(e.toString());}});}catch(Exception e){ui.post(()->{if(id==generation)message("エラー: "+e.getMessage());});}});}
+  <T> void async(Task<T> task,Done<T> done){async(task,done,e->message("エラー: "+e.getMessage()));}
+  <T> void async(Task<T> task,Done<T> done,java.util.function.Consumer<Exception> fail){
+    int id=generation;ExecutorService executor="reader".equals(screen)?worker:browseWorker;
+    executor.execute(()->{if(id!=generation)return;try{T result=task.run();ui.post(()->{
+      if(id!=generation){if(result instanceof Spread){Spread discarded=(Spread)result;discarded.a.recycle();if(discarded.b!=null)discarded.b.recycle();}return;}
+      try{done.accept(result);}catch(Exception e){fail.accept(e);}
+    });}catch(Exception e){ui.post(()->{if(id==generation)fail.accept(e);});}});
+  }
   JSONObject records(){if(recordCache==null){try{recordCache=new JSONObject(prefs.getString("records","{}"));}catch(Exception e){recordCache=new JSONObject();}}return recordCache;}
   void put(String key,JSONObject value){try{JSONObject all=records();all.put(key,value);prefs.edit().putString("records",all.toString()).apply();}catch(Exception e){message(e.toString());}}
   JSONObject record(String key){JSONObject j=records().optJSONObject(key);return j==null?new JSONObject():j;}
   String clean(String s){return TitleSort.displayTitle(s);}
   String author(String s){java.util.regex.Matcher m=java.util.regex.Pattern.compile("\\[([^]]+)\\]").matcher(s);return m.find()?m.group(1):"";}
-  void home(){screen="home";folders.clear();DownloadCache.pin(null);reading=false;zip=null;clear();release();root.addView(text("漫画リーダー",25));LinearLayout bar=new LinearLayout(this);bar.addView(button("フォルダ",()->browse(prefs.getString("url",""),"フォルダ")));bar.addView(button("接続設定",this::settings));root.addView(bar);LinearLayout list=scroll();JSONObject all=records();ArrayList<JSONObject> recent=new ArrayList<>();Iterator<String> keys=all.keys();while(keys.hasNext()){JSONObject o=all.optJSONObject(keys.next());if(o!=null&&!o.optBoolean("finished"))recent.add(o);}recent.sort((a,b)->Long.compare(b.optLong("time"),a.optLong("time")));
+  void home(){screen="home";folders.clear();DownloadCache.pin(null);DownloadCache.cleanup(this);reading=false;zip=null;clear();release();root.addView(text("漫画リーダー",25));LinearLayout bar=new LinearLayout(this);bar.addView(button("フォルダ",()->browse(prefs.getString("url",""),"フォルダ")));bar.addView(button("接続設定",this::settings));root.addView(bar);LinearLayout list=scroll();JSONObject all=records();ArrayList<JSONObject> recent=new ArrayList<>();Iterator<String> keys=all.keys();while(keys.hasNext()){JSONObject o=all.optJSONObject(keys.next());if(o!=null&&!o.optBoolean("finished"))recent.add(o);}recent.sort((a,b)->Long.compare(b.optLong("time"),a.optLong("time")));
     list.addView(text("最近読んだ本",21));if(recent.isEmpty())list.addView(text("読みかけの本はありません",14));for(JSONObject o:recent){String name=o.optString("name"),url=o.optString("url"),fu=o.optString("folder"),fn=o.optString("folderName");TextView v=entry(clean(name),author(name)+"  途中 "+(o.optInt("page")+1)+" / "+o.optInt("total"));list.addView(v);v.setOnClickListener(w->openBook(url,name,fu,fn));}
     list.addView(text("読みかけのシリーズ",21));HashSet<String> seen=new HashSet<>();ArrayList<JSONObject> series=new ArrayList<>();for(JSONObject o:recent)if(seen.add(o.optString("folder")))series.add(o);
-    String sort=prefs.getString("sort","最近読んだ順");if(sort.equals("タイトル順"))series.sort((a,b)->RemoteZip.natural(clean(a.optString("folderName")),clean(b.optString("folderName"))));else if(sort.equals("著者順"))series.sort((a,b)->RemoteZip.natural(author(a.optString("folderName")),author(b.optString("folderName"))));
+    String sort=prefs.getString("sort","最近読んだ順");if(sort.equals("タイトル順")){TitleSort ts=new TitleSort();series.sort((a,b)->ts.compare(a.optString("folderName"),b.optString("folderName")));}else if(sort.equals("著者順"))series.sort((a,b)->RemoteZip.natural(author(a.optString("folderName")),author(b.optString("folderName"))));
     list.addView(button("並び替え: "+sort,()->new AlertDialog.Builder(this).setTitle("並び替え").setItems(new String[]{"最近読んだ順","タイトル順","著者順"},(d,n)->{prefs.edit().putString("sort",new String[]{"最近読んだ順","タイトル順","著者順"}[n]).apply();home();}).show()));
     for(JSONObject o:series){String fn=o.optString("folderName"),fu=o.optString("folder"),bn=o.optString("name");TextView v=entry(clean(fn),author(fn)+"\n"+clean(bn)+"  途中 "+(o.optInt("page")+1)+" / "+o.optInt("total"));list.addView(v);v.setOnClickListener(w->browse(fu,fn));}
   }
@@ -109,7 +116,7 @@ public class MainActivity extends Activity {
       android.content.pm.PackageInfo installed=getPackageManager().getPackageInfo(getPackageName(),0);
       if(release.code<=Updater.version(installed)){new AlertDialog.Builder(this).setTitle("更新確認").setMessage("最新版を使用しています。\n現在: "+installed.versionName).setPositiveButton("OK",null).show();return;}
       new AlertDialog.Builder(this).setTitle("新しいバージョンがあります")
-        .setMessage(release.name+" のGitHub Releaseページをブラウザで開きます。\nアプリ内から直接インストールは行いません。Play プロテクトが警告する場合はインストールを中止してください。")
+        .setMessage(release.name+" のGitHub Releaseページをブラウザで開きます。\nアプリ内から直接インストールは行いません。Play プロテクトで有害と警告された場合はインストールせず、警告内容を確認し、Googleによる再審査を検討してください。")
         .setNegativeButton("キャンセル",null).setPositiveButton("Releaseページを開く",(d,w)->{
           try{startActivity(new Intent(Intent.ACTION_VIEW,android.net.Uri.parse(release.page)));}
           catch(Exception e){message("ブラウザを開けません: "+e.getMessage());}
@@ -119,7 +126,7 @@ public class MainActivity extends Activity {
   Dav client() throws Exception{return new Dav(this,prefs.getString("url",""),prefs.getString("user",""),PasswordStore.read(prefs),prefs.getString("alias",""));}
   void browse(String url,String name){
     if(url.isEmpty()){settings();return;}
-    screen="browse";DownloadCache.pin(null);reading=false;clear();release();
+    screen="browse";DownloadCache.pin(null);DownloadCache.cleanup(this);reading=false;clear();release();
     root.addView(button("← ホーム",this::home));root.addView(text(clean(name),23));
     LinearLayout searchBar=new LinearLayout(this);
     EditText query=new EditText(this);query.setSingleLine();query.setHint("フォルダ名を検索");
@@ -176,7 +183,7 @@ public class MainActivity extends Activity {
             pending[0]=true;coverStatus.setText("取得中…");
             coverWorker.execute(()->{Bitmap image=null;String error=null;
               try{if(serial==coverSerial)image=FolderCovers.load(getApplicationContext(),item.url,()->client(),()->serial!=coverSerial || Thread.currentThread().isInterrupted());}
-              catch(Exception e){error=e.getMessage();if(error==null||error.isEmpty())error="通信エラー";}
+              catch(Exception e){error=e instanceof NestedBook.Limit?"探索上限":e.getMessage();if(error==null||error.isEmpty())error="通信エラー";}
               final Bitmap result=image;final String failure=error;
               ui.post(()->{
                 pending[0]=false;if(serial!=coverSerial)return;
@@ -201,8 +208,8 @@ public class MainActivity extends Activity {
     refresh.run();
     async(()->{Dav d=client();return d.list(url);},items->{loaded.addAll(items);ready[0]=true;refresh.run();});
   }
-  void openBook(String url,String name,String folder,String fname){screen="reader";DownloadCache.pin(url);bookUrl=url;bookName=name;folderUrl=folder;folderName=fname;reading=true;controlsVisible=false;prefetchRequested=false;prefetchStatus="";previous.clear();cuts.clear();JSONObject rec=record(url);leftToRightSpread=rec.optBoolean("leftToRightSpread",false);page=rec.optInt("page",0);JSONArray arr=rec.optJSONArray("cuts");if(arr!=null)for(int i=0;i<arr.length();i++)cuts.add(arr.optInt(i));clear();loadingBars();root.addView(button("← ホーム",this::home));root.addView(text("本を開いています…",20));downloadState="保存準備中";async(()->{Dav d=client();RemoteZip opened=new RemoteZip(d,url);DownloadCache.start(this,d,url,state->ui.post(()->{if(reading && url.equals(bookUrl)){downloadState=state;if(downloadLabel!=null)downloadLabel.setText("端末への保存: "+state);}}));return opened;},z->{zip=z;page=Math.max(0,Math.min(page,zip.pages.size()-1));render();});}
-  void save(){if(zip==null)return;JSONObject o=record(bookUrl);try{o.put("url",bookUrl);o.put("name",bookName);o.put("folder",folderUrl);o.put("folderName",folderName);o.put("page",page);o.put("total",zip.pages.size());o.put("time",System.currentTimeMillis());if(!o.has("finished"))o.put("finished",false);o.put("leftToRightSpread",leftToRightSpread);JSONArray a=new JSONArray();for(int cut:cuts)a.put(cut);o.put("cuts",a);put(bookUrl,o);}catch(Exception ignored){}}
+  void openBook(String url,String name,String folder,String fname){screen="reader";DownloadCache.pin(null);DownloadCache.touch(this,url);DownloadCache.pin(url);bookUrl=url;bookName=name;folderUrl=folder;folderName=fname;reading=true;controlsVisible=false;prefetchRequested=false;prefetchStatus="";previous.clear();cuts.clear();JSONObject rec=record(url);leftToRightSpread=rec.optBoolean("leftToRightSpread",false);page=rec.optInt("page",0);JSONArray arr=rec.optJSONArray("cuts");if(arr!=null)for(int i=0;i<arr.length();i++)cuts.add(arr.optInt(i));clear();loadingBars();root.addView(button("← ホーム",this::home));root.addView(text("本を開いています…",20));downloadState="保存準備中";async(()->{Dav d=client();RemoteZip opened=new RemoteZip(d,url);DownloadCache.start(this,d,url,state->ui.post(()->{if(reading && url.equals(bookUrl)){downloadState=state;if(downloadLabel!=null)downloadLabel.setText("端末への保存: "+state);}}));return opened;},z->{zip=z;if(rec.optInt("orientationCount",-1)==z.pages.size())z.orientations.putAll(OrientationCodec.decode(z.pages.size(),rec.optString("orientations","")));page=Math.max(0,Math.min(page,zip.pages.size()-1));render();});}
+  void save(){if(zip==null)return;JSONObject o=record(bookUrl);try{o.put("url",bookUrl);o.put("name",bookName);o.put("folder",folderUrl);o.put("folderName",folderName);o.put("page",page);o.put("total",zip.pages.size());o.put("time",System.currentTimeMillis());if(!o.has("finished"))o.put("finished",false);o.put("leftToRightSpread",leftToRightSpread);o.put("orientationCount",zip.pages.size());o.put("orientations",OrientationCodec.encode(zip.pages.size(),zip.orientations));JSONArray a=new JSONArray();for(int cut:cuts)a.put(cut);o.put("cuts",a);put(bookUrl,o);}catch(Exception ignored){}}
   void release(){if(right!=null){right.recycle();right=null;}if(left!=null){left.recycle();left=null;}}
   static final class Spread {Bitmap a,b;int next;Spread(Bitmap x,Bitmap y,int n){a=x;b=y;next=n;}}
   void scheduleGallery(RemoteZip current,int index,LinearLayout strip,HorizontalScrollView scroller,TextView caption){
@@ -303,6 +310,14 @@ public class MainActivity extends Activity {
           else {controlsVisible=!controlsVisible;systemBars(!controlsVisible);controls.setVisibility(controlsVisible?View.VISIBLE:View.GONE);seekPanel.setVisibility(controlsVisible?View.VISIBLE:View.GONE);if(controlsVisible)scheduleGallery(current,seek.getMax()-seek.getProgress(),strip,scroller,caption);else {clearThumbnail();strip.removeAllViews();}root.requestApplyInsets();controls.requestApplyInsets();seekPanel.requestApplyInsets();}
           return true;}return true;}});
       save();maybePrefetch();
+    },error->{
+      controlsVisible=true;systemBars(false);controls.setVisibility(View.VISIBLE);seekPanel.setVisibility(View.VISIBLE);
+      status.setText("ページ "+(requested+1)+" の読み込みに失敗: "+(error.getMessage()==null?"不明なエラー":error.getMessage()));
+      LinearLayout recovery=new LinearLayout(this);
+      recovery.addView(button("再試行",()->render()));
+      if(requested+1<current.pages.size())recovery.addView(button("次のページへ",()->{previous.put(requested+1,requested);page=requested+1;next=0;render();}));
+      else recovery.addView(button("読了画面へ",this::finishBook));
+      controls.addView(recovery);root.requestApplyInsets();controls.requestApplyInsets();seekPanel.requestApplyInsets();
     });
   }
   void adjustFromPrevious(){
@@ -354,7 +369,7 @@ public class MainActivity extends Activity {
     async(()->SpreadPlanner.containing(target,current.pages.size(),anchors,index->{
       if(jobGeneration!=generation)throw new java.io.IOException("中断しました");
       return current.isWide(index);
-    }),start->{previous.clear();page=start;next=0;render();});
+    }),start->{previous.clear();page=start;next=0;render();},error->{controlsVisible=true;render();message("ページ移動できません: "+error.getMessage());});
   }
   void forward(){if(zip==null||next<=page)return;if(next>=zip.pages.size()){finishBook();return;}previous.put(next,page);page=next;next=0;controlsVisible=false;render();}
   void finishBook(){
@@ -366,6 +381,6 @@ public class MainActivity extends Activity {
     dialog.show();
   }
   void backPage(){if(zip==null||page<=0)return;Integer p=previous.get(page);if(p==null){jumpToPage(page-1);return;}page=p;next=0;controlsVisible=false;render();}
-  @Override public void onBackPressed(){if("home".equals(screen)){super.onBackPressed();return;}if("browse".equals(screen)&&!folders.isEmpty()){String[] parent=folders.pop();browse(parent[0],parent[1]);return;}home();}
-  @Override protected void onDestroy(){generation++;coverSerial++;worker.shutdownNow();coverWorker.shutdownNow();thumbWorker.shutdownNow();prefetchWorker.shutdownNow();clearThumbnail();release();super.onDestroy();}
+  @Override public void onBackPressed(){if("home".equals(screen)){super.onBackPressed();return;}if("reader".equals(screen) && folderUrl!=null && !folderUrl.isEmpty()){browse(folderUrl,folderName);return;}if("browse".equals(screen)&&!folders.isEmpty()){String[] parent=folders.pop();browse(parent[0],parent[1]);return;}home();}
+  @Override protected void onDestroy(){generation++;coverSerial++;worker.shutdownNow();browseWorker.shutdownNow();coverWorker.shutdownNow();thumbWorker.shutdownNow();prefetchWorker.shutdownNow();clearThumbnail();release();super.onDestroy();}
 }

@@ -9,10 +9,10 @@ import java.util.zip.*;
 
 final class RemoteZip {
   static final class Page {String name;long offset,compressed,uncompressed;int method,flags; Page(String n,long o,long c,long u,int m,int f){name=n;offset=o;compressed=c;uncompressed=u;method=m;flags=f;}}
-  final Dav dav;final String url;final List<Page> pages=new ArrayList<>();
+  final Dav dav;final String url;final long archiveLength;final List<Page> pages=new ArrayList<>();
   final java.util.concurrent.ConcurrentHashMap<Integer,Boolean> orientations=new java.util.concurrent.ConcurrentHashMap<>();
   static int u16(byte[] b,int p){return (b[p]&255)|((b[p+1]&255)<<8);} static long u32(byte[] b,int p){return ((long)u16(b,p))|((long)u16(b,p+2)<<16);}
-  RemoteZip(Dav d,String u) throws Exception {dav=d;url=u;Dav.Range tail=d.range(u,-1,65557);byte[] b=tail.data;int end=-1;
+  RemoteZip(Dav d,String u) throws Exception {dav=d;url=u;Dav.Range tail=d.range(u,-1,65557);archiveLength=tail.total;byte[] b=tail.data;int end=-1;
     for(int i=b.length-22;i>=0;i--)if(u32(b,i)==0x06054b50L && i+22+u16(b,i+20)==b.length){end=i;break;}
     if(end<0)throw new IOException("ZIPの終端が見つかりません"); if(u16(b,end+4)!=0||u16(b,end+6)!=0)throw new IOException("分割ZIPは未対応です");long size=u32(b,end+12),off=u32(b,end+16);int count=u16(b,end+10);
     if(size==0xffffffffL||off==0xffffffffL||count==65535)throw new IOException("ZIP64は未対応です");if(size<=0||size>8*1024*1024||off+size>tail.total)throw new IOException("ZIP目次が大きすぎるか不正です");
@@ -28,14 +28,17 @@ final class RemoteZip {
   boolean isWide(int idx) throws Exception {
     Boolean known=orientations.get(idx);if(known!=null)return known;
     Page p=pages.get(idx);
-    if((p.flags&1)!=0 || (p.method!=0 && p.method!=8) || p.compressed>32L*1024*1024 || p.uncompressed>80L*1024*1024 || p.compressed==0)
-      throw new IOException("画像形式が未対応か、画像が大きすぎます");
-    byte[] head=dav.range(url,p.offset,p.offset+29).data;
-    if(u32(head,0)!=0x04034b50L)throw new IOException("ZIPヘッダーが不正です");
+    if((p.flags&1)!=0 || (p.method!=0 && p.method!=8) || p.compressed==0)
+      throw new IOException("画像形式が未対応か、画像が空です");
+    long end=Math.min(archiveLength-1,p.offset+30+8192-1);
+    byte[] head=dav.range(url,p.offset,end).data;
+    if(head.length<30||u32(head,0)!=0x04034b50L)throw new IOException("ZIPヘッダーが不正です");
     long offset=p.offset+30+u16(head,26)+u16(head,28);
-    int size=(int)Math.min(p.compressed,8192);
+    int start=(int)(offset-p.offset);
+    int available=Math.max(0,head.length-start);
+    int size=(int)Math.min(p.compressed,available>0?Math.min(8192,available):8192);
     while(size>0){
-      byte[] packed=dav.range(url,offset,offset+size-1).data;
+      byte[] packed=start>=0 && (long)start+size<=head.length?Arrays.copyOfRange(head,start,start+size):dav.range(url,offset,offset+size-1).data;
       byte[] prefix=p.method==0?packed:inflatePrefix(packed,1024*1024);
       int[] dimensions=JpegHeader.dimensions(prefix);
       if(dimensions==null)dimensions=PngHeader.dimensions(prefix);
@@ -59,6 +62,6 @@ final class RemoteZip {
   }
   Bitmap bitmap(int idx,int maxW,int maxH) throws Exception {
     byte[] raw=imageData(idx);
-    BitmapFactory.Options o=new BitmapFactory.Options();o.inJustDecodeBounds=true;BitmapFactory.decodeByteArray(raw,0,raw.length,o);if(o.outWidth<=0||o.outHeight<=0)throw new IOException("画像を読めません");orientations.put(idx,o.outWidth>=o.outHeight);o.inSampleSize=1;while(o.outWidth/o.inSampleSize>maxW*2 || o.outHeight/o.inSampleSize>maxH*2)o.inSampleSize*=2;o.inJustDecodeBounds=false;o.inPreferredConfig=Bitmap.Config.RGB_565;Bitmap result=BitmapFactory.decodeByteArray(raw,0,raw.length,o);if(result==null)throw new IOException("画像の読み込みに失敗しました");return result;
+    BitmapFactory.Options o=new BitmapFactory.Options();o.inJustDecodeBounds=true;BitmapFactory.decodeByteArray(raw,0,raw.length,o);if(o.outWidth<=0||o.outHeight<=0)throw new IOException("画像を読めません");orientations.put(idx,o.outWidth>=o.outHeight);o.inSampleSize=1;while(o.outWidth/o.inSampleSize>maxW*2 || o.outHeight/o.inSampleSize>maxH*2)o.inSampleSize*=2;o.inJustDecodeBounds=false;o.inPreferredConfig=pages.get(idx).name.toLowerCase(Locale.ROOT).endsWith(".png")?Bitmap.Config.ARGB_8888:Bitmap.Config.RGB_565;Bitmap result=BitmapFactory.decodeByteArray(raw,0,raw.length,o);if(result==null)throw new IOException("画像の読み込みに失敗しました");return result;
   }
 }
