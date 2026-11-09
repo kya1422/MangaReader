@@ -32,7 +32,7 @@ final class FolderCovers {
       float scale=Math.min(1f,Math.min(160f/cropWidth,220f/decoded.getHeight()));
       int w=Math.max(1,Math.round(cropWidth*scale)),h=Math.max(1,Math.round(decoded.getHeight()*scale));
       small=Bitmap.createBitmap(w,h,Bitmap.Config.RGB_565);
-      Canvas canvas=new Canvas(small);
+      Canvas canvas=new Canvas(small);canvas.drawColor(android.graphics.Color.WHITE);
       canvas.drawBitmap(decoded,new Rect(0,0,cropWidth,decoded.getHeight()),new Rect(0,0,w,h),new Paint(Paint.FILTER_BITMAP_FLAG));
       File temp=new File(dir,file.getName()+".tmp");
       try{
