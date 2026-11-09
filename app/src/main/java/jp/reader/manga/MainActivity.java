@@ -17,10 +17,12 @@ import java.util.concurrent.*;
 
 public class MainActivity extends Activity {
   android.content.SharedPreferences prefs; ExecutorService worker=Executors.newSingleThreadExecutor(); Handler ui=new Handler(Looper.getMainLooper()); volatile int generation=0; LinearLayout root; Dav dav; RemoteZip zip; String bookUrl,bookName,folderUrl,folderName; int page=0,next=0; boolean reading=false; HashMap<Integer,Integer> previous=new HashMap<>(); TreeSet<Integer> cuts=new TreeSet<>(); Bitmap right,left; String alias=""; String downloadState=""; TextView downloadLabel; boolean controlsVisible=false; boolean leftToRightSpread=false; final ExecutorService thumbWorker=Executors.newSingleThreadExecutor(); final ArrayList<ImageView> thumbnailViews=new ArrayList<>(); final ArrayList<Bitmap> thumbnailBitmaps=new ArrayList<>(); volatile int previewSerial=0; Runnable previewPending; final ExecutorService prefetchWorker=Executors.newSingleThreadExecutor(); boolean prefetchRequested=false; String prefetchStatus=""; TextView prefetchLabel; JSONObject recordCache; String screen="home"; final ArrayDeque<String[]> folders=new ArrayDeque<>();
+  final ExecutorService coverWorker=Executors.newSingleThreadExecutor(); volatile int coverSerial=0;
   interface Task<T>{T run() throws Exception;} interface Done<T>{void accept(T x) throws Exception;}
   public void onCreate(Bundle b){super.onCreate(b);prefs=getSharedPreferences("reader",MODE_PRIVATE);alias=prefs.getString("alias","");DownloadCache.cleanup(this);home();}
   void clear(){
     generation++;
+    coverSerial++;
     clearThumbnail();
     systemBars(reading && !controlsVisible);
     root=new LinearLayout(this);
@@ -120,22 +122,61 @@ public class MainActivity extends Activity {
     EditText query=new EditText(this);query.setSingleLine();query.setHint("フォルダ名を検索");
     searchBar.addView(query,new LinearLayout.LayoutParams(0,-2,1));
     Button order=new Button(this);order.setAllCaps(false);searchBar.addView(order);root.addView(searchBar);
-    LinearLayout list=scroll();TextView status=text("読み込み中…",16);list.addView(status);
+    LinearLayout coverBar=new LinearLayout(this);
+    Button coverToggle=button("",()->{});coverBar.addView(coverToggle);
+    TextView coverCredit=text("画像: Open Library",12);coverCredit.setOnClickListener(v->{try{startActivity(new Intent(Intent.ACTION_VIEW,android.net.Uri.parse("https://openlibrary.org/")));}catch(Exception ignored){}});coverBar.addView(coverCredit);root.addView(coverBar);
+    LinearLayout list=scroll();ScrollView coverScroll=(ScrollView)list.getParent();
+    TextView status=text("読み込み中…",16);list.addView(status);
+    ArrayList<Runnable> visibleCoverChecks=new ArrayList<>();
+    Runnable checkCovers=()->{for(Runnable check:visibleCoverChecks)check.run();};
+    coverToggle.setText(prefs.getBoolean("covers_enabled",false)?"表紙: オン":"表紙: オフ");
+    coverToggle.setOnClickListener(v->{
+      if(prefs.getBoolean("covers_enabled",false)){prefs.edit().putBoolean("covers_enabled",false).apply();browse(url,name);}
+      else new AlertDialog.Builder(this).setTitle("ネットから表紙を取得")
+        .setMessage("表示中のフォルダ名をOpen Libraryに送信して、漫画の1巻の表紙を検索します。別作品や小説版が表示される場合があります。画像は小さくして許可される場合に最大7日間キャッシュします。オンにしますか？")
+        .setNegativeButton("キャンセル",null).setPositiveButton("オンにする",(d,w)->{prefs.edit().putBoolean("covers_enabled",true).apply();browse(url,name);}).show();
+    });
+    coverScroll.setOnScrollChangeListener((v,x,y,oldX,oldY)->checkCovers.run());
     ArrayList<Dav.Item> loaded=new ArrayList<>();boolean[] ready={false};
     Runnable refresh=()->{
       boolean descending=prefs.getBoolean("browse_descending",false);
       order.setText(descending?"名前順 ↓":"名前順 ↑");
       if(!ready[0])return;
-      list.removeAllViews();
+      coverSerial++;final int serial=coverSerial;visibleCoverChecks.clear();list.removeAllViews();
       ArrayList<Dav.Item> visible=new ArrayList<>();
       for(Dav.Item item:loaded)if(BrowseSearch.matches(item.name,item.dir,query.getText().toString()))visible.add(item);
       visible.sort((a,b)->{if(a.dir!=b.dir)return a.dir?-1:1;return descending?RemoteZip.natural(b.name,a.name):RemoteZip.natural(a.name,b.name);});
       for(Dav.Item item:visible){
         JSONObject rec=record(item.url);String sub=item.dir?"フォルダ":rec.length()==0?"未読":rec.optBoolean("finished")?"既読":"途中  "+(rec.optInt("page")+1)+" / "+rec.optInt("total");
-        TextView v=entry(clean(item.name),author(item.name)+"  "+sub);list.addView(v);
-        v.setOnClickListener(w->{if(item.dir){folders.push(new String[]{url,name});browse(item.url,item.name);}else openBook(item.url,item.name,url,name);});
+        TextView v=entry(clean(item.name),author(item.name)+"  "+sub);
+        LinearLayout row=new LinearLayout(this);row.setGravity(Gravity.CENTER_VERTICAL);
+        if(item.dir){
+          ImageView cover=new ImageView(this);cover.setScaleType(ImageView.ScaleType.FIT_CENTER);
+          int density=(int)(getResources().getDisplayMetrics().density*100);
+          row.addView(cover,new LinearLayout.LayoutParams(72*density/100,96*density/100));
+          boolean[] pending={false},failed={false};
+          visibleCoverChecks.add(()->{
+            if(serial!=coverSerial)return;
+            android.graphics.Rect rect=new android.graphics.Rect();
+            boolean visible=prefs.getBoolean("covers_enabled",false)&&row.isShown()&&row.getGlobalVisibleRect(rect);
+            if(!visible){cover.setImageDrawable(null);return;}
+            if(pending[0]||failed[0]||cover.getDrawable()!=null)return;
+            pending[0]=true;String title=clean(item.name);
+            coverWorker.execute(()->{Bitmap image=null;try{if(serial==coverSerial)image=FolderCovers.load(getApplicationContext(),item.url,title);}catch(Exception ignored){}
+              final Bitmap result=image;
+              ui.post(()->{
+                pending[0]=false;if(serial!=coverSerial)return;
+                if(result==null){failed[0]=true;return;}
+                android.graphics.Rect r=new android.graphics.Rect();if(row.isShown()&&row.getGlobalVisibleRect(r))cover.setImageBitmap(result);
+              });
+            });
+          });
+        }
+        row.addView(v,new LinearLayout.LayoutParams(0,-2,1));list.addView(row);
+        row.setOnClickListener(w->{if(item.dir){folders.push(new String[]{url,name});browse(item.url,item.name);}else openBook(item.url,item.name,url,name);});
       }
       if(visible.isEmpty())list.addView(text(loaded.isEmpty()?"フォルダまたはZIPがありません":"一致する項目がありません",16));
+      list.post(checkCovers);
     };
     order.setOnClickListener(v->{prefs.edit().putBoolean("browse_descending",!prefs.getBoolean("browse_descending",false)).apply();refresh.run();});
     query.addTextChangedListener(new android.text.TextWatcher(){
@@ -312,5 +353,5 @@ public class MainActivity extends Activity {
   }
   void backPage(){if(zip==null||page<=0)return;Integer p=previous.get(page);if(p==null){jumpToPage(page-1);return;}page=p;next=0;controlsVisible=false;render();}
   @Override public void onBackPressed(){if("home".equals(screen)){super.onBackPressed();return;}if("browse".equals(screen)&&!folders.isEmpty()){String[] parent=folders.pop();browse(parent[0],parent[1]);return;}home();}
-  @Override protected void onDestroy(){generation++;worker.shutdownNow();thumbWorker.shutdownNow();prefetchWorker.shutdownNow();clearThumbnail();release();super.onDestroy();}
+  @Override protected void onDestroy(){generation++;coverSerial++;worker.shutdownNow();coverWorker.shutdownNow();thumbWorker.shutdownNow();prefetchWorker.shutdownNow();clearThumbnail();release();super.onDestroy();}
 }
