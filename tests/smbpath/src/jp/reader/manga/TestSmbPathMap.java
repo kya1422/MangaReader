@@ -10,5 +10,11 @@ class TestSmbPathMap{
    try{map.relative(bad);throw new AssertionError("accepted "+bad);}catch(IllegalArgumentException expected){}
   }
   check(true,"cross-origin, outside-root and encoded traversal rejected");
+  SmbAliases aliases=new SmbAliases("https://example.com/Comic/");
+  aliases.remember("https://example.com/Comic/%e4%bd%9c%e5%93%81/%31.zip");
+  check(aliases.lookup("https://example.com/Comic/%E4%BD%9C%E5%93%81/1.zip").equals("https://example.com/Comic/%e4%bd%9c%e5%93%81/%31.zip"),"legacy encoded URL reused");
+  aliases.remember("https://example.com/Comic/作品/2.zip");
+  check(aliases.lookup("https://example.com/Comic/%E4%BD%9C%E5%93%81/2.zip").equals("https://example.com/Comic/作品/2.zip"),"unencoded legacy URL reused");
+  check(aliases.lookup("https://example.com/Comic/%E4%BD%9C%E5%93%81/3.zip").equals("https://example.com/Comic/%E4%BD%9C%E5%93%81/3.zip"),"unknown path keeps generated URL");
  }
 }

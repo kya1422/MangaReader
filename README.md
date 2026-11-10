@@ -104,4 +104,4 @@ WebDAVの作成日はサーバーが返す値で、必ずしも追加日時で�
 
 Wi-Fi名の判定にはAndroidの位置情報権限と端末側の位置情報設定が必要な場合があります。許可しない・SSIDが取れない・指定と違う場合はWebDAVを使います。Samba接続や認証に失敗した場合も読み始める前ならWebDAVに戻ります。読み込みが始まった後にWi-Fiが切れるなどした場合は、異なる内容が混ざらないよう自動では切り替えず、エラーを表示します。本を開き直してください。SMB1は使用せず、SMB2/3の署名を必須にしています。通信の暗号化はサーバー設定・SMBバージョンに依存し、必ずしも暗号化されません。SSIDやIPアドレスは偽装可能で、サーバーの本人確認にはなりません。信頼できるLAN、専用の読み取り専用Sambaアカウント、強固なパスワードを使い、SMBをインターネットへ公開しないでください。
 
-閲覧位置やキャッシュはWebDAV側のURLを論理的な本のIDとして維持します。SambaとWebDAVが別の内容を指す設定は使わないでください。SMBの作成日時とWebDAVの作成日時はサーバー実装により異なる場合があります。使用ライブラリ: SMBJ・asn-one（Apache License 2.0）、Bouncy Castle・SLF4J・mbassador（それぞれのライセンス）。Apache、Bouncy Castle、SLF4Jのライセンスは `app/src/main/assets/licenses/` に同梱しています。実際のSambaサーバーおよびBOOXでは未検証です。
+閲覧位置やキャッシュはWebDAV側のURLを論理的な本のIDとして維持します。SambaとWebDAVが別の内容を指す設定は使わないでください。SMBの作成日時とWebDAVの作成日時はサーバー実装により異なる場合があります。使用ライブラリ: SMBJ・asn-one（Apache License 2.0）、Bouncy Castle・SLF4J・mbassador（それぞれのライセンス）。各ライブラリのライセンスは `app/src/main/assets/licenses/` に同梱しています。実際のSambaサーバーおよびBOOXでは未検証です。

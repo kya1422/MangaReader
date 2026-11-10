@@ -51,7 +51,7 @@ mkdir -p "$tmp/arrivals"
 javac -encoding UTF-8 -d "$tmp/arrivals" $(find tests/zip/src -name '*.java' ! -name TestMain.java) app/src/main/java/jp/reader/manga/{NewArrivals,HiddenFolders,NestedBook,FirstBook,RemoteZip,JpegHeader,PngHeader,ZipNames}.java tests/arrivals/src/jp/reader/manga/TestArrivals.java
 java -Dfile.encoding=UTF-8 -cp "$tmp/arrivals" jp.reader.manga.TestArrivals
 mkdir -p "$tmp/smbpath"
-javac -encoding UTF-8 -d "$tmp/smbpath" $(find tests/zip/src -name '*.java' ! -name TestMain.java) app/src/main/java/jp/reader/manga/{SmbPathMap,NestedBook,FirstBook,RemoteZip,JpegHeader,PngHeader,ZipNames}.java tests/smbpath/src/jp/reader/manga/TestSmbPathMap.java
+javac -encoding UTF-8 -d "$tmp/smbpath" $(find tests/zip/src -name '*.java' ! -name TestMain.java) app/src/main/java/jp/reader/manga/{SmbPathMap,SmbAliases,NestedBook,FirstBook,RemoteZip,JpegHeader,PngHeader,ZipNames}.java tests/smbpath/src/jp/reader/manga/TestSmbPathMap.java
 java -Dfile.encoding=UTF-8 -cp "$tmp/smbpath" jp.reader.manga.TestSmbPathMap
 mkdir -p "$tmp/smbaddress"
 javac -encoding UTF-8 -d "$tmp/smbaddress" tests/smbaddress/src/jp/reader/manga/TestSmbAddress.java app/src/main/java/jp/reader/manga/SmbAddress.java

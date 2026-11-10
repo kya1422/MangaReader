@@ -15,7 +15,7 @@ final class Dav {
   private static final okhttp3.OkHttpClient SHARED_CLIENT=new okhttp3.OkHttpClient.Builder().followRedirects(false).followSslRedirects(false).connectTimeout(20,java.util.concurrent.TimeUnit.SECONDS).readTimeout(30,java.util.concurrent.TimeUnit.SECONDS).build();
   static final class Item { String url,name; boolean dir; long createdAt; Item(String u,String n,boolean d){this(u,n,d,0);} Item(String u,String n,boolean d,long c){url=u;name=n;dir=d;createdAt=c;} }
   final Context ctx; final String base,user,pass,alias; final SSLSocketFactory ssl; final X509TrustManager trust;
-  private final SmbBackend smb;private final String smbSsid;private volatile boolean routeSelected,usingSmb;private boolean transferStarted;private final Map<String,String> knownUrls=new HashMap<>();
+  private final SmbBackend smb;private final String smbSsid;private volatile boolean routeSelected,usingSmb;private boolean transferStarted;private final SmbAliases knownUrls;
   Dav(Context c,String b,String u,String p,String a) throws Exception {
     ctx=c; base=b; user=u; pass=p; alias=a;
     android.content.SharedPreferences preferences=c.getSharedPreferences("reader",Context.MODE_PRIVATE);
@@ -24,13 +24,12 @@ final class Dav {
     if(preferences.getBoolean("smb_enabled",false)&&SmbAddress.privateIpv4(host)&&!share.isEmpty()&&!username.isEmpty()&&SmbWifi.matches(c,smbSsid)){
       try{String password=SmbPasswordStore.read(preferences);candidate=new SmbBackend(b,host,445,share,username,password.toCharArray(),"");}catch(Exception|LinkageError ignored){/* invalid SMB settings: keep WebDAV available */}
     }
-    smb=candidate;
+    smb=candidate;knownUrls=smb==null?null:new SmbAliases(b);
     if(smb!=null){
-      rememberUrl(b);
       try{org.json.JSONObject records=new org.json.JSONObject(preferences.getString("records","{}"));Iterator<String> keys=records.keys();while(keys.hasNext()){
-        String key=keys.next();rememberUrl(key);org.json.JSONObject entry=records.optJSONObject(key);if(entry!=null){rememberUrl(entry.optString("url",""));rememberUrl(entry.optString("folder",""));}
+        String key=keys.next();knownUrls.remember(key);org.json.JSONObject entry=records.optJSONObject(key);if(entry!=null){knownUrls.remember(entry.optString("url",""));knownUrls.remember(entry.optString("folder",""));}
       }}catch(Exception ignored){}
-      for(String url:preferences.getStringSet("hidden_folders",Collections.emptySet()))rememberUrl(url);
+      for(String url:preferences.getStringSet("hidden_folders",Collections.emptySet()))knownUrls.remember(url);
     }
     if (!"https".equalsIgnoreCase(new URL(b).getProtocol())) throw new IOException("HTTPSのURLを指定してください");
     TrustManagerFactory tmf=TrustManagerFactory.getInstance(TrustManagerFactory.getDefaultAlgorithm()); tmf.init((KeyStore)null); trust=(X509TrustManager)tmf.getTrustManagers()[0];
@@ -48,8 +47,6 @@ final class Dav {
     };
     SSLContext sc=SSLContext.getInstance("TLS"); sc.init(new KeyManager[]{km},null,null);ssl=sc.getSocketFactory();
   }
-  private void rememberUrl(String url){try{if(url!=null&&!url.isEmpty())knownUrls.putIfAbsent(smb.relative(url),url);}catch(Exception ignored){}}
-  private String knownUrl(String url){try{String original=knownUrls.get(smb.relative(url));return original==null?url:original;}catch(Exception ignored){return url;}}
   private synchronized boolean useSmb() throws Exception {
     if(routeSelected){if(usingSmb&&!SmbWifi.matches(ctx,smbSsid)){if(transferStarted)throw new IOException("指定Wi-Fiから切断されました。本を開き直してください");usingSmb=false;}return usingSmb;}
     if(Thread.currentThread().isInterrupted())throw new InterruptedException("接続を中止しました");
@@ -85,7 +82,7 @@ final class Dav {
   static byte[] read(InputStream in,int max) throws IOException { try(InputStream s=in;ByteArrayOutputStream o=new ByteArrayOutputStream()){byte[] b=new byte[16384];int n,total=0;while((n=s.read(b))!=-1){total+=n;if(total>max)throw new IOException("データが上限を超えました");o.write(b,0,n);}return o.toByteArray();} }
   List<Item> list(String url) throws Exception {
     synchronized(this){if(useSmb()){
-      try{List<Item> entries=new ArrayList<>();for(SmbBackend.Entry e:smb.list(url))entries.add(new Item(knownUrl(e.url),e.name,e.directory,e.createdAt));return entries;}
+      try{List<Item> entries=new ArrayList<>();for(SmbBackend.Entry e:smb.list(url))entries.add(new Item(knownUrls.lookup(e.url),e.name,e.directory,e.createdAt));return entries;}
       catch(Exception|LinkageError e){if(transferStarted||Thread.currentThread().isInterrupted())throw new IOException("Sambaに接続できません",e);usingSmb=false;}
     }}
     URL root=new URL(base), targetUrl=new URL(url); if(!"https".equals(targetUrl.getProtocol()) || !root.getHost().equalsIgnoreCase(targetUrl.getHost()) || root.getPort()!=targetUrl.getPort()) throw new IOException("接続先が不正です");
