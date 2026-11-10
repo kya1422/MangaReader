@@ -13,7 +13,7 @@ import java.util.*;
 final class Dav {
   static final String USER_AGENT = "MangaReader/0.1 (Android)";
   private static final okhttp3.OkHttpClient SHARED_CLIENT=new okhttp3.OkHttpClient.Builder().followRedirects(false).followSslRedirects(false).connectTimeout(20,java.util.concurrent.TimeUnit.SECONDS).readTimeout(30,java.util.concurrent.TimeUnit.SECONDS).build();
-  static final class Item { String url,name; boolean dir; Item(String u,String n,boolean d){url=u;name=n;dir=d;} }
+  static final class Item { String url,name; boolean dir; long createdAt; Item(String u,String n,boolean d){this(u,n,d,0);} Item(String u,String n,boolean d,long c){url=u;name=n;dir=d;createdAt=c;} }
   final Context ctx; final String base,user,pass,alias; final SSLSocketFactory ssl; final X509TrustManager trust;
   Dav(Context c,String b,String u,String p,String a) throws Exception {
     ctx=c; base=b; user=u; pass=p; alias=a;
@@ -45,7 +45,7 @@ final class Dav {
     URL root=new URL(base), targetUrl=new URL(url); if(!"https".equals(targetUrl.getProtocol()) || !root.getHost().equalsIgnoreCase(targetUrl.getHost()) || root.getPort()!=targetUrl.getPort()) throw new IOException("接続先が不正です");
     okhttp3.OkHttpClient.Builder builder=SHARED_CLIENT.newBuilder();
     if(ssl!=null)builder.sslSocketFactory(ssl,trust);
-    okhttp3.Request.Builder req=new okhttp3.Request.Builder().url(url).header("Depth","1").header("User-Agent",USER_AGENT).header("Accept-Encoding","identity").method("PROPFIND",okhttp3.RequestBody.create("<?xml version=\"1.0\"?><d:propfind xmlns:d=\"DAV:\"><d:prop><d:resourcetype/><d:displayname/></d:prop></d:propfind>",okhttp3.MediaType.get("application/xml; charset=utf-8")));
+    okhttp3.Request.Builder req=new okhttp3.Request.Builder().url(url).header("Depth","1").header("User-Agent",USER_AGENT).header("Accept-Encoding","identity").method("PROPFIND",okhttp3.RequestBody.create("<?xml version=\"1.0\"?><d:propfind xmlns:d=\"DAV:\"><d:prop><d:resourcetype/><d:displayname/><d:creationdate/></d:prop></d:propfind>",okhttp3.MediaType.get("application/xml; charset=utf-8")));
     if(!user.isEmpty())req.header("Authorization","Basic "+Base64.encodeToString((user+":"+pass).getBytes("UTF-8"),Base64.NO_WRAP));
     try(okhttp3.Response response=builder.build().newCall(req.build()).execute()) {if(response.code()!=207||response.body()==null)throw new IOException("WebDAV一覧取得失敗 HTTP "+response.code());
       List<DavXml.Entry> entries=DavXml.parse(read(response.body().byteStream(),4*1024*1024));List<Item> out=new ArrayList<>();
@@ -55,7 +55,7 @@ final class Dav {
         String currentPath=URLDecoder.decode(targetUrl.getPath().replace("+","%2B"),"UTF-8").replaceAll("/$","");
         if(targetPath.equals(currentPath) && target.getPort()==targetUrl.getPort() && target.getHost().equalsIgnoreCase(targetUrl.getHost()))continue;
         boolean dir=entry.directory;String path=target.getPath().replaceAll("/$","");String name=URLDecoder.decode(path.substring(path.lastIndexOf('/')+1).replace("+","%2B"),"UTF-8");if(dir&&!href.endsWith("/"))href+="/";
-        if(dir||name.toLowerCase(Locale.ROOT).endsWith(".zip")||name.toLowerCase(Locale.ROOT).endsWith(".cbz")||name.toLowerCase(Locale.ROOT).endsWith(".rar")||name.toLowerCase(Locale.ROOT).endsWith(".cbr"))out.add(new Item(href,name,dir));
+        if(dir||name.toLowerCase(Locale.ROOT).endsWith(".zip")||name.toLowerCase(Locale.ROOT).endsWith(".cbz")||name.toLowerCase(Locale.ROOT).endsWith(".rar")||name.toLowerCase(Locale.ROOT).endsWith(".cbr"))out.add(new Item(href,name,dir,NewArrivals.parseCreation(entry.creationDate)));
       }catch(IllegalArgumentException|java.net.MalformedURLException ignored){/* skip malformed entries, not the entire listing */}}return out;
     }
   }

@@ -44,3 +44,9 @@ java -Dfile.encoding=UTF-8 -cp "$tmp/coverdispatch" jp.reader.manga.TestCoverDis
 mkdir -p "$tmp/hidden"
 javac -encoding UTF-8 -d "$tmp/hidden" $(find tests/zip/src -name '*.java' ! -name TestMain.java) app/src/main/java/jp/reader/manga/{HiddenFolders,NestedBook,FirstBook,RemoteZip,JpegHeader,PngHeader,ZipNames}.java tests/hidden/src/jp/reader/manga/TestHidden.java
 java -Dfile.encoding=UTF-8 -cp "$tmp/hidden" jp.reader.manga.TestHidden
+mkdir -p "$tmp/davxml"
+javac -encoding UTF-8 -d "$tmp/davxml" $(find tests/davxml/src -name '*.java') app/src/main/java/jp/reader/manga/DavXml.java
+java -Dfile.encoding=UTF-8 -cp "$tmp/davxml" jp.reader.manga.TestDavXml
+mkdir -p "$tmp/arrivals"
+javac -encoding UTF-8 -d "$tmp/arrivals" $(find tests/zip/src -name '*.java' ! -name TestMain.java) app/src/main/java/jp/reader/manga/{NewArrivals,HiddenFolders,NestedBook,FirstBook,RemoteZip,JpegHeader,PngHeader,ZipNames}.java tests/arrivals/src/jp/reader/manga/TestArrivals.java
+java -Dfile.encoding=UTF-8 -cp "$tmp/arrivals" jp.reader.manga.TestArrivals

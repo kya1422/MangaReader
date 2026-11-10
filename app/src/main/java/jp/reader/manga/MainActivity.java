@@ -18,6 +18,8 @@ import java.util.concurrent.*;
 public class MainActivity extends Activity {
   android.content.SharedPreferences prefs; ExecutorService worker=Executors.newFixedThreadPool(2); final ExecutorService browseWorker=Executors.newFixedThreadPool(2); Handler ui=new Handler(Looper.getMainLooper()); volatile int generation=0; LinearLayout root; Dav dav; RemoteZip zip; String bookUrl,bookName,folderUrl,folderName; int page=0,next=0; boolean reading=false; HashMap<Integer,Integer> previous=new HashMap<>(); TreeSet<Integer> cuts=new TreeSet<>(); Bitmap right,left; String alias=""; String downloadState=""; TextView downloadLabel; boolean controlsVisible=false; boolean leftToRightSpread=false; final ExecutorService thumbWorker=Executors.newSingleThreadExecutor(); final ArrayList<ImageView> thumbnailViews=new ArrayList<>(); final ArrayList<Bitmap> thumbnailBitmaps=new ArrayList<>(); volatile int previewSerial=0; Runnable previewPending; final ExecutorService prefetchWorker=Executors.newSingleThreadExecutor(); boolean prefetchRequested=false; String prefetchStatus=""; TextView prefetchLabel; JSONObject recordCache; String screen="home"; final ArrayDeque<String[]> folders=new ArrayDeque<>();
   String manualCoverTarget,manualCoverName; boolean manualCoverSaving;
+  final ExecutorService arrivalsWorker=Executors.newSingleThreadExecutor();
+  NewArrivals.Result arrivalsCache;String arrivalsCacheRoot;Set<String> arrivalsCacheHidden;long arrivalsCacheTime;
   final CoverDispatcher coverWorker=new CoverDispatcher(); final ExecutorService bookCloser=Executors.newSingleThreadExecutor(); volatile int coverSerial=0;
   void closeBookAsync(RemoteZip book){
     if(book==null)return;book.cancel();
@@ -96,18 +98,59 @@ public class MainActivity extends Activity {
   }
   String clean(String s){return TitleSort.displayTitle(s);}
   String author(String s){java.util.regex.Matcher m=java.util.regex.Pattern.compile("\\[([^]]+)\\]").matcher(s);return m.find()?m.group(1):"";}
-  void home(){manualCoverTarget=null;manualCoverName=null;screen="home";folders.clear();DownloadCache.pin(null);DownloadCache.cleanup(this);reading=false;closeCurrentBook();clear();release();root.addView(text("漫画リーダー",25));LinearLayout bar=new LinearLayout(this);bar.addView(button("フォルダ",()->browse(prefs.getString("url",""),"フォルダ")));bar.addView(button("接続設定",this::settings));root.addView(bar);LinearLayout list=scroll();JSONObject all=records();ArrayList<JSONObject> recent=new ArrayList<>();Iterator<String> keys=all.keys();while(keys.hasNext()){JSONObject o=all.optJSONObject(keys.next());if(o!=null&&!o.optBoolean("finished")&&!hiddenRecord(o))recent.add(o);}recent.sort((a,b)->Long.compare(b.optLong("time"),a.optLong("time")));
+  void home(){manualCoverTarget=null;manualCoverName=null;screen="home";folders.clear();DownloadCache.pin(null);DownloadCache.cleanup(this);reading=false;closeCurrentBook();clear();release();root.addView(text("漫画リーダー",25));LinearLayout bar=new LinearLayout(this);bar.addView(button("フォルダ",()->browse(prefs.getString("url",""),"フォルダ")));bar.addView(button("接続設定",this::settings));root.addView(bar);LinearLayout list=scroll();
+    list.addView(text("新着・未読（1か月）",21));
+    LinearLayout arrivalHeader=new LinearLayout(this);TextView arrivalStatus=text("新着を確認中…",13);arrivalHeader.addView(arrivalStatus,new LinearLayout.LayoutParams(0,-2,1));arrivalHeader.addView(button("更新",()->{arrivalsCacheTime=0;home();}));list.addView(arrivalHeader);
+    LinearLayout arrivalList=new LinearLayout(this);arrivalList.setOrientation(LinearLayout.VERTICAL);list.addView(arrivalList);
+    startNewArrivals(arrivalStatus,arrivalList);
+    JSONObject all=records();ArrayList<JSONObject> recent=new ArrayList<>();Iterator<String> keys=all.keys();while(keys.hasNext()){JSONObject o=all.optJSONObject(keys.next());if(o!=null&&!o.optBoolean("finished")&&!hiddenRecord(o))recent.add(o);}recent.sort((a,b)->Long.compare(b.optLong("time"),a.optLong("time")));
     list.addView(text("最近読んだ本",21));if(recent.isEmpty())list.addView(text("読みかけの本はありません",14));for(JSONObject o:recent){String name=o.optString("name"),url=o.optString("url"),fu=o.optString("folder"),fn=o.optString("folderName");TextView v=entry(clean(name),author(name)+"  途中 "+(o.optInt("page")+1)+" / "+o.optInt("total"));list.addView(v);v.setOnClickListener(w->openBook(url,name,fu,fn));}
     list.addView(text("読みかけのシリーズ",21));HashSet<String> seen=new HashSet<>();ArrayList<JSONObject> series=new ArrayList<>();for(JSONObject o:recent)if(seen.add(o.optString("folder")))series.add(o);
     String sort=prefs.getString("sort","最近読んだ順");if(sort.equals("タイトル順")){TitleSort ts=new TitleSort();series.sort((a,b)->ts.compare(a.optString("folderName"),b.optString("folderName")));}else if(sort.equals("著者順"))series.sort((a,b)->RemoteZip.natural(author(a.optString("folderName")),author(b.optString("folderName"))));
     list.addView(button("並び替え: "+sort,()->new AlertDialog.Builder(this).setTitle("並び替え").setItems(new String[]{"最近読んだ順","タイトル順","著者順"},(d,n)->{prefs.edit().putString("sort",new String[]{"最近読んだ順","タイトル順","著者順"}[n]).apply();home();}).show()));
     for(JSONObject o:series){String fn=o.optString("folderName"),fu=o.optString("folder"),bn=o.optString("name");TextView v=entry(clean(fn),author(fn)+"\n"+clean(bn)+"  途中 "+(o.optInt("page")+1)+" / "+o.optInt("total"));list.addView(v);v.setOnClickListener(w->browse(fu,fn));}
   }
+  void displayNewArrivals(TextView status,LinearLayout list,NewArrivals.Result result,long now,long cutoff){
+    ArrayList<NewArrivals.Book> visible=new ArrayList<>();Set<String> hidden=hiddenFolders();JSONObject all=records();
+    for(NewArrivals.Book book:result.books)if(book.date>=cutoff&&book.date<=now&&!all.has(book.url)&&!HiddenFolders.hidden(hidden,book.url))visible.add(book);
+    String label=(result.complete?"取得完了":"確認中")+"："+visible.size()+"冊 / "+result.scanned+"フォルダ";
+    if(result.errors>0)label+="・取得失敗 "+result.errors+"フォルダ";
+    if(result.unknown>0)label+="・作成日不明 "+result.unknown+"冊（対象外）";
+    if(result.limited)label+="・探索または表示の上限に到達（一部のみ）";
+    status.setText(label);list.removeAllViews();
+    if(result.complete&&visible.isEmpty())list.addView(text(result.errors>0||result.limited?"一部を取得できていないため、結果は不完全です":"対象の未読本はありません",14));
+    java.text.SimpleDateFormat format=new java.text.SimpleDateFormat("yyyy/MM/dd",java.util.Locale.JAPAN);
+    for(NewArrivals.Book book:visible){
+      TextView row=entry(clean(book.name),clean(book.folderName)+"  作成日 "+format.format(new java.util.Date(book.date)));list.addView(row);
+      row.setOnClickListener(v->openBook(book.url,book.name,book.folder,book.folderName));
+    }
+  }
+  void startNewArrivals(TextView status,LinearLayout list){
+    final String rootUrl=prefs.getString("url","");if(rootUrl.isEmpty()){status.setText("接続設定後に新着を確認できます");return;}
+    final int serial=generation;Set<String> hidden=hiddenFolders();
+    final long now=System.currentTimeMillis(),cutoff=java.time.Instant.ofEpochMilli(now).atZone(java.time.ZoneId.systemDefault()).minusMonths(1).toInstant().toEpochMilli();
+    if(arrivalsCache!=null&&rootUrl.equals(arrivalsCacheRoot)&&hidden.equals(arrivalsCacheHidden)&&now>=arrivalsCacheTime&&now-arrivalsCacheTime<5*60*1000L){
+      displayNewArrivals(status,list,arrivalsCache,now,cutoff);status.append("（前回の結果・更新で再取得）");return;
+    }
+    Set<String> read=new HashSet<>();Iterator<String> keys=records().keys();while(keys.hasNext())read.add(keys.next());
+    arrivalsWorker.execute(()->{
+      if(serial!=generation||Thread.currentThread().isInterrupted())return;
+      try{
+        Dav client=client();
+        NewArrivals.scan(rootUrl,client::list,read,hidden,now,cutoff,()->serial!=generation||Thread.currentThread().isInterrupted(),result->ui.post(()->{
+          if(serial!=generation||!"home".equals(screen))return;
+          if(result.complete&&result.errors==0&&!result.limited){arrivalsCache=result;arrivalsCacheRoot=rootUrl;arrivalsCacheHidden=new HashSet<>(hidden);arrivalsCacheTime=System.currentTimeMillis();}
+          long current=System.currentTimeMillis();long currentCutoff=java.time.Instant.ofEpochMilli(current).atZone(java.time.ZoneId.systemDefault()).minusMonths(1).toInstant().toEpochMilli();
+          displayNewArrivals(status,list,result,current,currentCutoff);
+        }));
+      }catch(Exception e){ui.post(()->{if(serial==generation&&"home".equals(screen))status.setText("新着を取得できません: "+(e.getMessage()==null?"不明なエラー":e.getMessage()));});}
+    });
+  }
   void settings(){screen="settings";alias=prefs.getString("alias","");clear();root.addView(button("← ホーム",this::home));root.addView(text("WebDAV接続設定",23));LinearLayout l=scroll();EditText u=new EditText(this),n=new EditText(this),p=new EditText(this);u.setHint("https://example.com/webdav/");u.setSingleLine();u.setText(prefs.getString("url",""));n.setHint("ユーザー名（必要な場合）");n.setText(prefs.getString("user",""));p.setHint("パスワード（端末内に保存）");p.setInputType(129);try{p.setText(PasswordStore.read(prefs));}catch(Exception e){message("保存したパスワードを読み込めません。再入力して保存してください。");}l.addView(u);l.addView(n);l.addView(p);TextView cert=text("証明書: "+(alias.isEmpty()?"未選択":alias),15);l.addView(cert);l.addView(button("証明書をインストール",()->{try{startActivityForResult(KeyChain.createInstallIntent(),102);}catch(Exception e){message("証明書インストール画面を開けません: "+e.getMessage());}}));l.addView(button("インストール済み証明書を選択",()->{try{KeyChain.choosePrivateKeyAlias(this,a->ui.post(()->{if(a!=null){alias=a;cert.setText("証明書: "+a);}else message("証明書が選択されませんでした。端末にクライアント証明書をインストールしてください。");}),null,null,null,-1,alias.isEmpty()?null:alias);}catch(Exception e){message("証明書選択画面を開けません: "+e.getMessage());}}));l.addView(button("証明書を解除",()->{alias="";cert.setText("証明書: 未選択");}));l.addView(text("PKCS#12（.p12/.pfx）を端末にインストール後、インストール済み証明書を選択し、最後に保存を押してください。WebDAVパスワードはAndroid Keystoreの鍵で暗号化して保存します。",14));l.addView(button("保存パスワードをリセット",()->new AlertDialog.Builder(this).setTitle("保存パスワードのリセット")
       .setMessage("保存済みパスワードと暗号化鍵を削除します。次回接続には再入力が必要です。クライアント証明書は削除しません。")
       .setNegativeButton("キャンセル",null).setPositiveButton("削除",(d,w)->{try{PasswordStore.reset(prefs);p.setText("");message("パスワードをリセットしました。再入力して保存してください。");}catch(Exception e){message("リセットに失敗しました: "+e.getMessage());}}).show()));
     l.addView(button("非表示タイトル",this::hiddenTitles));
-    CheckBox prefetch=new CheckBox(this);prefetch.setText("読み終わる前に次巻をダウンロード（90％付近）");prefetch.setChecked(prefs.getBoolean("prefetch_next",true));l.addView(prefetch);l.addView(button("閲覧履歴を管理",this::history));l.addView(button("アプリの更新を確認",this::checkUpdate));l.addView(button("保存",()->{String url=u.getText().toString().trim();if(!url.startsWith("https://")){message("HTTPSのURLを入力してください");return;}if(!url.endsWith("/"))url+="/";try{PasswordStore.write(prefs,p.getText().toString());}catch(Exception e){message("パスワードを安全に保存できませんでした。設定は保存されていません。");return;}prefs.edit().putString("url",url).putString("user",n.getText().toString()).putString("alias",alias).putBoolean("prefetch_next",prefetch.isChecked()).apply();home();}));}
+    CheckBox prefetch=new CheckBox(this);prefetch.setText("読み終わる前に次巻をダウンロード（90％付近）");prefetch.setChecked(prefs.getBoolean("prefetch_next",true));l.addView(prefetch);l.addView(button("閲覧履歴を管理",this::history));l.addView(button("アプリの更新を確認",this::checkUpdate));l.addView(button("保存",()->{String url=u.getText().toString().trim();if(!url.startsWith("https://")){message("HTTPSのURLを入力してください");return;}if(!url.endsWith("/"))url+="/";try{PasswordStore.write(prefs,p.getText().toString());}catch(Exception e){message("パスワードを安全に保存できませんでした。設定は保存されていません。");return;}arrivalsCache=null;prefs.edit().putString("url",url).putString("user",n.getText().toString()).putString("alias",alias).putBoolean("prefetch_next",prefetch.isChecked()).apply();home();}));}
   void hiddenTitles(){
     screen="hidden";clear();root.addView(button("← 接続設定",this::settings));root.addView(text("非表示タイトル",23));
     LinearLayout list=scroll();ArrayList<String> items=new ArrayList<>(hiddenFolders());
@@ -504,5 +547,5 @@ public class MainActivity extends Activity {
   }
   void backPage(){if(zip==null||page<=0)return;Integer p=previous.get(page);if(p==null){jumpToPage(page-1);return;}page=p;next=0;controlsVisible=false;render();}
   @Override public void onBackPressed(){if("home".equals(screen)){super.onBackPressed();return;}if("hidden".equals(screen)){settings();return;}if("reader".equals(screen) && folderUrl!=null && !folderUrl.isEmpty()){browse(folderUrl,folderName);return;}if("browse".equals(screen)&&!folders.isEmpty()){String[] parent=folders.pop();browse(parent[0],parent[1]);return;}home();}
-  @Override protected void onDestroy(){generation++;coverSerial++;closeCurrentBook();worker.shutdownNow();browseWorker.shutdownNow();coverWorker.shutdownNow();thumbWorker.shutdownNow();prefetchWorker.shutdownNow();bookCloser.shutdown();clearThumbnail();release();super.onDestroy();}
+  @Override protected void onDestroy(){generation++;coverSerial++;closeCurrentBook();worker.shutdownNow();browseWorker.shutdownNow();arrivalsWorker.shutdownNow();coverWorker.shutdownNow();thumbWorker.shutdownNow();prefetchWorker.shutdownNow();bookCloser.shutdown();clearThumbnail();release();super.onDestroy();}
 }
