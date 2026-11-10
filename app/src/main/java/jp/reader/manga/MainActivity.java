@@ -159,7 +159,11 @@ public class MainActivity extends Activity {
         .setMessage("各フォルダを探索し、最初のZIP/CBZ/RAR/CBRから先頭ページを取得して、縮小し端末に保存します。直下になければ子フォルダを名前順に探します。漫画ファイルの先頭ページが表紙でない場合は別の画像になります。オンにしますか？")
         .setNegativeButton("キャンセル",null).setPositiveButton("オンにする",(d,w)->{prefs.edit().putBoolean("covers_enabled",true).apply();browse(url,name);}).show();
     });
-    coverScroll.setOnScrollChangeListener((v,x,y,oldX,oldY)->checkCovers.run());
+    coverScroll.setOnScrollChangeListener((v,x,y,oldX,oldY)->{
+      checkCovers.run();
+      // Recheck after scrolling/layout settles, including when a cancelled request finishes late.
+      coverScroll.removeCallbacks(checkCovers);coverScroll.postDelayed(checkCovers,150);
+    });
     coverScroll.getViewTreeObserver().addOnGlobalLayoutListener(()->checkCovers.run());
     ArrayList<Dav.Item> loaded=new ArrayList<>();boolean[] ready={false};
     Runnable refresh=()->{
@@ -187,9 +191,8 @@ public class MainActivity extends Activity {
           java.util.concurrent.atomic.AtomicBoolean[] active={null};
           Runnable check=()->{
             if(serial!=coverSerial)return;
-            android.graphics.Rect rect=new android.graphics.Rect();
-            boolean rowVisible=prefs.getBoolean("covers_enabled",false)&&row.isShown()&&row.getGlobalVisibleRect(rect);
-            if(!rowVisible){if(active[0]!=null)active[0].set(true);cover.setImageDrawable(null);return;}
+            boolean rowNear=prefs.getBoolean("covers_enabled",false)&&row.isShown()&&CoverWindow.contains(row.getTop(),row.getBottom(),coverScroll.getScrollY(),coverScroll.getHeight());
+            if(!rowNear){if(active[0]!=null)active[0].set(true);cover.setImageDrawable(null);return;}
             if(pending[0]||failed[0]||cover.getDrawable()!=null)return;
             pending[0]=true;coverStatus.setText("待機中…");
             java.util.concurrent.atomic.AtomicBoolean cancelled=new java.util.concurrent.atomic.AtomicBoolean();active[0]=cancelled;
@@ -204,10 +207,10 @@ public class MainActivity extends Activity {
               ui.post(()->{
                 pending[0]=false;active[0]=null;
                 if(serial!=coverSerial){if(result!=null)result.recycle();return;}
-                android.graphics.Rect r=new android.graphics.Rect();boolean visibleNow=row.isShown()&&row.getGlobalVisibleRect(r)&&prefs.getBoolean("covers_enabled",false);
-                if(cancelled.get()||!visibleNow){if(result!=null)result.recycle();coverStatus.setText("");if(visibleNow)list.post(checkCovers);return;}
+                boolean nearNow=row.isShown()&&prefs.getBoolean("covers_enabled",false)&&CoverWindow.contains(row.getTop(),row.getBottom(),coverScroll.getScrollY(),coverScroll.getHeight());
+                if(cancelled.get()||!nearNow){if(result!=null)result.recycle();coverStatus.setText("");if(nearNow)list.post(checkCovers);return;}
                 if(result==null){failed[0]=true;coverStatus.setText((failure==null?"画像なし":failure)+"\nタップで再試行");return;}
-                coverStatus.setText("");cover.setImageBitmap(result);
+                coverStatus.setText("");cover.setImageBitmap(result);cover.invalidate();coverFrame.invalidate();
               });
             });
           };
