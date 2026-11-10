@@ -18,6 +18,20 @@ import java.util.concurrent.*;
 public class MainActivity extends Activity {
   android.content.SharedPreferences prefs; ExecutorService worker=Executors.newFixedThreadPool(2); final ExecutorService browseWorker=Executors.newFixedThreadPool(2); Handler ui=new Handler(Looper.getMainLooper()); volatile int generation=0; LinearLayout root; Dav dav; RemoteZip zip; String bookUrl,bookName,folderUrl,folderName; int page=0,next=0; boolean reading=false; HashMap<Integer,Integer> previous=new HashMap<>(); TreeSet<Integer> cuts=new TreeSet<>(); Bitmap right,left; String alias=""; String downloadState=""; TextView downloadLabel; boolean controlsVisible=false; boolean leftToRightSpread=false; final ExecutorService thumbWorker=Executors.newSingleThreadExecutor(); final ArrayList<ImageView> thumbnailViews=new ArrayList<>(); final ArrayList<Bitmap> thumbnailBitmaps=new ArrayList<>(); volatile int previewSerial=0; Runnable previewPending; final ExecutorService prefetchWorker=Executors.newSingleThreadExecutor(); boolean prefetchRequested=false; String prefetchStatus=""; TextView prefetchLabel; JSONObject recordCache; String screen="home"; final ArrayDeque<String[]> folders=new ArrayDeque<>();
   String manualCoverTarget,manualCoverName; boolean manualCoverSaving;
+  EditText pendingWifiName; int pendingWifiGeneration;
+  void fillWifiName(EditText field){
+    String name=SmbWifi.currentSsid(this);
+    if(name==null){message("Wi-Fi名を取得できません。Wi-Fi接続、正確な位置情報の許可、端末の位置情報設定を確認してください。手入力もできます。");return;}
+    field.setText(name);message("現在のWi-Fi名を入力しました。保存を押してください。");
+  }
+  @Override public void onRequestPermissionsResult(int requestCode,String[] permissions,int[] grantResults){
+    super.onRequestPermissionsResult(requestCode,permissions,grantResults);
+    if(requestCode!=302)return;
+    EditText field=pendingWifiName;pendingWifiName=null;
+    if(field==null||pendingWifiGeneration!=generation||!"settings".equals(screen)||!field.isAttachedToWindow())return;
+    if(checkSelfPermission(android.Manifest.permission.ACCESS_FINE_LOCATION)==android.content.pm.PackageManager.PERMISSION_GRANTED)fillWifiName(field);
+    else message("正確な位置情報が許可されていないためWi-Fi名を取得できません。WebDAVは引き続き利用できます。");
+  }
   final ExecutorService arrivalsWorker=Executors.newSingleThreadExecutor();
   NewArrivals.Result arrivalsCache;String arrivalsCacheRoot;Set<String> arrivalsCacheHidden;long arrivalsCacheTime;
   final CoverDispatcher coverWorker=new CoverDispatcher(); final ExecutorService bookCloser=Executors.newSingleThreadExecutor(); volatile int coverSerial=0;
@@ -154,6 +168,12 @@ public class MainActivity extends Activity {
     CheckBox smbEnabled=new CheckBox(this);smbEnabled.setText("指定Wi-FiではSambaを優先する");smbEnabled.setChecked(prefs.getBoolean("smb_enabled",false));l.addView(smbEnabled);
     EditText smbSsid=new EditText(this),smbHost=new EditText(this),smbShare=new EditText(this),smbUser=new EditText(this),smbPass=new EditText(this);
     smbSsid.setSingleLine();smbSsid.setHint("自宅Wi-Fiの名前（SSID）");smbSsid.setText(prefs.getString("smb_ssid",""));l.addView(smbSsid);
+    l.addView(button("現在のWi-Fi名を取得",()->{
+      if(checkSelfPermission(android.Manifest.permission.ACCESS_FINE_LOCATION)==android.content.pm.PackageManager.PERMISSION_GRANTED){fillWifiName(smbSsid);return;}
+      new AlertDialog.Builder(this).setTitle("Wi-Fi名の取得")
+        .setMessage("AndroidでWi-Fi名を取得・照合するには正確な位置情報の権限が必要です。端末の位置情報設定もオンが必要な場合があります。位置情報そのものは取得・送信しません。許可しない場合はWebDAVを使用します。")
+        .setNegativeButton("キャンセル",null).setPositiveButton("権限を確認",(d,w)->{pendingWifiName=smbSsid;pendingWifiGeneration=generation;requestPermissions(new String[]{android.Manifest.permission.ACCESS_FINE_LOCATION,android.Manifest.permission.ACCESS_COARSE_LOCATION},302);}).show();
+    }));
     smbHost.setSingleLine();smbHost.setHint("SambaサーバーのプライベートIPv4アドレス");smbHost.setText(prefs.getString("smb_host",""));l.addView(smbHost);
     smbShare.setSingleLine();smbShare.setHint("共有名（例: Comic）");smbShare.setText(prefs.getString("smb_share",""));l.addView(smbShare);
     smbUser.setSingleLine();smbUser.setHint("Sambaユーザー名");smbUser.setText(prefs.getString("smb_user",""));l.addView(smbUser);
