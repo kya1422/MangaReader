@@ -24,7 +24,7 @@ final class FolderCovers {
     }
     Dav dav=client.get();Dav.Item first=NestedBook.find(folderUrl,dav::list,cancel);
     if(first==null)return null;
-    RemoteZip zip=new RemoteZip(dav,first.url);
+    RemoteZip zip=RemoteBooks.open(dav,first.url,first.name);
     Bitmap decoded=zip.bitmap(0,320,220);
     Bitmap small=null;
     try{

@@ -55,7 +55,7 @@ final class Dav {
         String currentPath=URLDecoder.decode(targetUrl.getPath().replace("+","%2B"),"UTF-8").replaceAll("/$","");
         if(targetPath.equals(currentPath) && target.getPort()==targetUrl.getPort() && target.getHost().equalsIgnoreCase(targetUrl.getHost()))continue;
         boolean dir=entry.directory;String path=target.getPath().replaceAll("/$","");String name=URLDecoder.decode(path.substring(path.lastIndexOf('/')+1).replace("+","%2B"),"UTF-8");if(dir&&!href.endsWith("/"))href+="/";
-        if(dir||name.toLowerCase(Locale.ROOT).endsWith(".zip")||name.toLowerCase(Locale.ROOT).endsWith(".cbz"))out.add(new Item(href,name,dir));
+        if(dir||name.toLowerCase(Locale.ROOT).endsWith(".zip")||name.toLowerCase(Locale.ROOT).endsWith(".cbz")||name.toLowerCase(Locale.ROOT).endsWith(".rar")||name.toLowerCase(Locale.ROOT).endsWith(".cbr"))out.add(new Item(href,name,dir));
       }catch(IllegalArgumentException|java.net.MalformedURLException ignored){/* skip malformed entries, not the entire listing */}}return out;
     }
   }

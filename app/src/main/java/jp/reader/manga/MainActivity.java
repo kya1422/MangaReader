@@ -146,7 +146,7 @@ public class MainActivity extends Activity {
     coverToggle.setOnClickListener(v->{
       if(prefs.getBoolean("covers_enabled",false)){prefs.edit().putBoolean("covers_enabled",false).apply();browse(url,name);}
       else new AlertDialog.Builder(this).setTitle("WebDAVから表紙を取得")
-        .setMessage("各フォルダを探索し、最初のZIP/CBZから先頭ページを取得して、縮小し端末に保存します。直下になければ子フォルダを名前順に探します。漫画ZIPの先頭ページが表紙でない場合は別の画像になります。オンにしますか？")
+        .setMessage("各フォルダを探索し、最初のZIP/CBZ/RAR/CBRから先頭ページを取得して、縮小し端末に保存します。直下になければ子フォルダを名前順に探します。漫画ファイルの先頭ページが表紙でない場合は別の画像になります。オンにしますか？")
         .setNegativeButton("キャンセル",null).setPositiveButton("オンにする",(d,w)->{prefs.edit().putBoolean("covers_enabled",true).apply();browse(url,name);}).show();
     });
     coverScroll.setOnScrollChangeListener((v,x,y,oldX,oldY)->checkCovers.run());
@@ -196,7 +196,7 @@ public class MainActivity extends Activity {
         row.addView(v,new LinearLayout.LayoutParams(0,-2,1));list.addView(row);
         row.setOnClickListener(w->{if(item.dir){folders.push(new String[]{url,name});browse(item.url,item.name);}else openBook(item.url,item.name,url,name);});
       }
-      if(visible.isEmpty())list.addView(text(loaded.isEmpty()?"フォルダまたはZIPがありません":"一致する項目がありません",16));
+      if(visible.isEmpty())list.addView(text(loaded.isEmpty()?"フォルダまたは対応ファイルがありません":"一致する項目がありません",16));
       list.post(checkCovers);
     };
     order.setOnClickListener(v->{prefs.edit().putBoolean("browse_descending",!prefs.getBoolean("browse_descending",false)).apply();refresh.run();});
@@ -208,7 +208,7 @@ public class MainActivity extends Activity {
     refresh.run();
     async(()->{Dav d=client();return d.list(url);},items->{loaded.addAll(items);ready[0]=true;refresh.run();});
   }
-  void openBook(String url,String name,String folder,String fname){screen="reader";DownloadCache.pin(null);DownloadCache.touch(this,url);DownloadCache.pin(url);bookUrl=url;bookName=name;folderUrl=folder;folderName=fname;reading=true;controlsVisible=false;prefetchRequested=false;prefetchStatus="";previous.clear();cuts.clear();JSONObject rec=record(url);leftToRightSpread=rec.optBoolean("leftToRightSpread",false);page=rec.optInt("page",0);JSONArray arr=rec.optJSONArray("cuts");if(arr!=null)for(int i=0;i<arr.length();i++)cuts.add(arr.optInt(i));clear();loadingBars();root.addView(button("← ホーム",this::home));root.addView(text("本を開いています…",20));downloadState="保存準備中";async(()->{Dav d=client();RemoteZip opened=new RemoteZip(d,url);DownloadCache.start(this,d,url,state->ui.post(()->{if(reading && url.equals(bookUrl)){downloadState=state;if(downloadLabel!=null)downloadLabel.setText("端末への保存: "+state);}}));return opened;},z->{zip=z;if(rec.optInt("orientationCount",-1)==z.pages.size())z.orientations.putAll(OrientationCodec.decode(z.pages.size(),rec.optString("orientations","")));page=Math.max(0,Math.min(page,zip.pages.size()-1));render();});}
+  void openBook(String url,String name,String folder,String fname){screen="reader";DownloadCache.pin(null);DownloadCache.touch(this,url);DownloadCache.pin(url);bookUrl=url;bookName=name;folderUrl=folder;folderName=fname;reading=true;controlsVisible=false;prefetchRequested=false;prefetchStatus="";previous.clear();cuts.clear();JSONObject rec=record(url);leftToRightSpread=rec.optBoolean("leftToRightSpread",false);page=rec.optInt("page",0);JSONArray arr=rec.optJSONArray("cuts");if(arr!=null)for(int i=0;i<arr.length();i++)cuts.add(arr.optInt(i));clear();loadingBars();root.addView(button("← ホーム",this::home));root.addView(text("本を開いています…",20));downloadState="保存準備中";async(()->{Dav d=client();RemoteZip opened=RemoteBooks.open(d,url,name);DownloadCache.start(this,d,url,state->ui.post(()->{if(reading && url.equals(bookUrl)){downloadState=state;if(downloadLabel!=null)downloadLabel.setText("端末への保存: "+state);}}));return opened;},z->{zip=z;if(rec.optInt("orientationCount",-1)==z.pages.size())z.orientations.putAll(OrientationCodec.decode(z.pages.size(),rec.optString("orientations","")));page=Math.max(0,Math.min(page,zip.pages.size()-1));render();});}
   void save(){if(zip==null)return;JSONObject o=record(bookUrl);try{o.put("url",bookUrl);o.put("name",bookName);o.put("folder",folderUrl);o.put("folderName",folderName);o.put("page",page);o.put("total",zip.pages.size());o.put("time",System.currentTimeMillis());if(!o.has("finished"))o.put("finished",false);o.put("leftToRightSpread",leftToRightSpread);o.put("orientationCount",zip.pages.size());o.put("orientations",OrientationCodec.encode(zip.pages.size(),zip.orientations));JSONArray a=new JSONArray();for(int cut:cuts)a.put(cut);o.put("cuts",a);put(bookUrl,o);}catch(Exception ignored){}}
   void release(){if(right!=null){right.recycle();right=null;}if(left!=null){left.recycle();left=null;}}
   static final class Spread {Bitmap a,b;int next;Spread(Bitmap x,Bitmap y,int n){a=x;b=y;next=n;}}

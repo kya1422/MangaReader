@@ -7,12 +7,13 @@ import java.nio.charset.Charset;
 import java.util.*;
 import java.util.zip.*;
 
-final class RemoteZip {
+class RemoteZip {
   static final class Page {String name;long offset,compressed,uncompressed;int method,flags; Page(String n,long o,long c,long u,int m,int f){name=n;offset=o;compressed=c;uncompressed=u;method=m;flags=f;}}
   final Dav dav;final String url;final long archiveLength;final List<Page> pages=new ArrayList<>();
   final java.util.concurrent.ConcurrentHashMap<Integer,Boolean> orientations=new java.util.concurrent.ConcurrentHashMap<>();
   static int u16(byte[] b,int p){return (b[p]&255)|((b[p+1]&255)<<8);} static long u32(byte[] b,int p){return ((long)u16(b,p))|((long)u16(b,p+2)<<16);}
-  RemoteZip(Dav d,String u) throws Exception {dav=d;url=u;Dav.Range tail=d.range(u,-1,65557);archiveLength=tail.total;byte[] b=tail.data;int end=-1;
+  RemoteZip(Dav d,String u) throws Exception {this(d,u,false);}
+  RemoteZip(Dav d,String u,boolean rar) throws Exception {dav=d;url=u;Dav.Range tail=d.range(u,-1,rar?1:65557);archiveLength=tail.total;if(rar)return;byte[] b=tail.data;int end=-1;
     for(int i=b.length-22;i>=0;i--)if(u32(b,i)==0x06054b50L && i+22+u16(b,i+20)==b.length){end=i;break;}
     if(end<0)throw new IOException("ZIPの終端が見つかりません"); if(u16(b,end+4)!=0||u16(b,end+6)!=0)throw new IOException("分割ZIPは未対応です");long size=u32(b,end+12),off=u32(b,end+16);int count=u16(b,end+10);
     if(size==0xffffffffL||off==0xffffffffL||count==65535)throw new IOException("ZIP64は未対応です");if(size<=0||size>8*1024*1024||off+size>tail.total)throw new IOException("ZIP目次が大きすぎるか不正です");

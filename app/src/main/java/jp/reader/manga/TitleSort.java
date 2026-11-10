@@ -8,7 +8,7 @@ import java.util.Locale;
 final class TitleSort {
   private final Collator collator=Collator.getInstance(Locale.JAPAN);
   static String displayTitle(String name){
-    return name.replaceFirst("^\\s*\\([^)]*\\)\\s*","").replaceFirst("^\\s*\\[[^]]*\\]\\s*","").replaceFirst("(?i)\\.(zip|cbz)$","").trim();
+    return name.replaceFirst("^\\s*\\([^)]*\\)\\s*","").replaceFirst("^\\s*\\[[^]]*\\]\\s*","").replaceFirst("(?i)\\.(zip|cbz|rar|cbr)$","").trim();
   }
   int compare(String a,String b){
     String x=Normalizer.normalize(displayTitle(a),Normalizer.Form.NFKC);
