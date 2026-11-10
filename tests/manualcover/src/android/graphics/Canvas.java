@@ -1,1 +1,1 @@
-package android.graphics; public class Canvas {public Canvas(Bitmap b){}public void drawColor(int c){}public void drawBitmap(Bitmap b,Rect src,Rect dst,Paint p){}}
+package android.graphics; public class Canvas {public static Rect lastSource;public Canvas(Bitmap b){}public void drawColor(int c){}public void drawBitmap(Bitmap b,Rect src,Rect dst,Paint p){lastSource=src;}}

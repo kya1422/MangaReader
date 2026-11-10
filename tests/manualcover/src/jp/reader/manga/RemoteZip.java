@@ -1,1 +1,1 @@
-package jp.reader.manga;import java.util.*;import android.graphics.Bitmap;class RemoteZip{List<Integer> pages=Arrays.asList(0,1,2);static int lastPage=-1;Bitmap bitmap(int page,int w,int h){lastPage=page;return new Bitmap(400,800);}void cancel(){}void close(){}}
+package jp.reader.manga;import java.util.*;import android.graphics.Bitmap;class RemoteZip{List<Integer> pages=Arrays.asList(0,1,2);static int lastPage=-1;Bitmap bitmap(int page,int w,int h){lastPage=page;return new Bitmap(1600,800);}void cancel(){}void close(){}}

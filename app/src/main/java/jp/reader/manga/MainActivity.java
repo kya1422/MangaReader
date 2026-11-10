@@ -88,7 +88,7 @@ public class MainActivity extends Activity {
   void put(String key,JSONObject value){try{JSONObject all=records();all.put(key,value);prefs.edit().putString("records",all.toString()).apply();}catch(Exception e){message(e.toString());}}
   JSONObject record(String key){JSONObject j=records().optJSONObject(key);return j==null?new JSONObject():j;}
   Set<String> hiddenFolders(){return new HashSet<>(prefs.getStringSet("hidden_folders",Collections.emptySet()));}
-  boolean hiddenItem(String url){return !prefs.getBoolean("show_hidden",false)&&HiddenFolders.hidden(hiddenFolders(),url);}
+  boolean hiddenItem(String url){return HiddenFolders.hidden(hiddenFolders(),url);}
   boolean hiddenRecord(JSONObject o){return hiddenItem(o.optString("folder"))||hiddenItem(o.optString("url"));}
   void setHiddenFolder(String url,boolean hide){
     Set<String> all=hiddenFolders();all.removeIf(old->HiddenFolders.contains(old,url)&&HiddenFolders.contains(url,old));
@@ -106,8 +106,22 @@ public class MainActivity extends Activity {
   void settings(){screen="settings";alias=prefs.getString("alias","");clear();root.addView(button("← ホーム",this::home));root.addView(text("WebDAV接続設定",23));LinearLayout l=scroll();EditText u=new EditText(this),n=new EditText(this),p=new EditText(this);u.setHint("https://example.com/webdav/");u.setSingleLine();u.setText(prefs.getString("url",""));n.setHint("ユーザー名（必要な場合）");n.setText(prefs.getString("user",""));p.setHint("パスワード（端末内に保存）");p.setInputType(129);try{p.setText(PasswordStore.read(prefs));}catch(Exception e){message("保存したパスワードを読み込めません。再入力して保存してください。");}l.addView(u);l.addView(n);l.addView(p);TextView cert=text("証明書: "+(alias.isEmpty()?"未選択":alias),15);l.addView(cert);l.addView(button("証明書をインストール",()->{try{startActivityForResult(KeyChain.createInstallIntent(),102);}catch(Exception e){message("証明書インストール画面を開けません: "+e.getMessage());}}));l.addView(button("インストール済み証明書を選択",()->{try{KeyChain.choosePrivateKeyAlias(this,a->ui.post(()->{if(a!=null){alias=a;cert.setText("証明書: "+a);}else message("証明書が選択されませんでした。端末にクライアント証明書をインストールしてください。");}),null,null,null,-1,alias.isEmpty()?null:alias);}catch(Exception e){message("証明書選択画面を開けません: "+e.getMessage());}}));l.addView(button("証明書を解除",()->{alias="";cert.setText("証明書: 未選択");}));l.addView(text("PKCS#12（.p12/.pfx）を端末にインストール後、インストール済み証明書を選択し、最後に保存を押してください。WebDAVパスワードはAndroid Keystoreの鍵で暗号化して保存します。",14));l.addView(button("保存パスワードをリセット",()->new AlertDialog.Builder(this).setTitle("保存パスワードのリセット")
       .setMessage("保存済みパスワードと暗号化鍵を削除します。次回接続には再入力が必要です。クライアント証明書は削除しません。")
       .setNegativeButton("キャンセル",null).setPositiveButton("削除",(d,w)->{try{PasswordStore.reset(prefs);p.setText("");message("パスワードをリセットしました。再入力して保存してください。");}catch(Exception e){message("リセットに失敗しました: "+e.getMessage());}}).show()));
-    CheckBox showHidden=new CheckBox(this);showHidden.setText("非表示にしたフォルダを表示する（パスコードなし）");showHidden.setChecked(prefs.getBoolean("show_hidden",false));showHidden.setOnCheckedChangeListener((button,checked)->prefs.edit().putBoolean("show_hidden",checked).apply());l.addView(showHidden);
+    l.addView(button("非表示タイトル",this::hiddenTitles));
     CheckBox prefetch=new CheckBox(this);prefetch.setText("読み終わる前に次巻をダウンロード（90％付近）");prefetch.setChecked(prefs.getBoolean("prefetch_next",true));l.addView(prefetch);l.addView(button("閲覧履歴を管理",this::history));l.addView(button("アプリの更新を確認",this::checkUpdate));l.addView(button("保存",()->{String url=u.getText().toString().trim();if(!url.startsWith("https://")){message("HTTPSのURLを入力してください");return;}if(!url.endsWith("/"))url+="/";try{PasswordStore.write(prefs,p.getText().toString());}catch(Exception e){message("パスワードを安全に保存できませんでした。設定は保存されていません。");return;}prefs.edit().putString("url",url).putString("user",n.getText().toString()).putString("alias",alias).putBoolean("prefetch_next",prefetch.isChecked()).apply();home();}));}
+  void hiddenTitles(){
+    screen="hidden";clear();root.addView(button("← 接続設定",this::settings));root.addView(text("非表示タイトル",23));
+    LinearLayout list=scroll();ArrayList<String> items=new ArrayList<>(hiddenFolders());
+    items.sort((a,b)->RemoteZip.natural(hiddenPath(a),hiddenPath(b)));
+    if(items.isEmpty())list.addView(text("非表示のタイトルはありません",16));
+    for(String url:items){
+      String path=hiddenPath(url);String name=path;while(name.endsWith("/")&&name.length()>1)name=name.substring(0,name.length()-1);name=name.substring(name.lastIndexOf('/')+1);
+      TextView row=entry(clean(name),path);list.addView(row);
+      final String title=name;
+      row.setOnClickListener(v->new AlertDialog.Builder(this).setTitle("非表示を取り消しますか？").setMessage(clean(title)+"\n"+path+"\n\n親フォルダにも非表示設定がある場合は、そちらも解除する必要があります。")
+        .setNegativeButton("キャンセル",null).setPositiveButton("非表示を取り消す",(d,w)->{setHiddenFolder(url,false);hiddenTitles();}).show());
+    }
+  }
+  String hiddenPath(String url){try{String path=new java.net.URI(NestedBook.safe(url)).getPath();return path==null?url:path;}catch(Exception e){return url;}}
   void history(){
     screen="history";clear();root.addView(button("← ホーム",this::home));root.addView(text("閲覧履歴（タップして削除）",23));
     LinearLayout list=scroll();JSONObject all=records();ArrayList<JSONObject> entries=new ArrayList<>();Iterator<String> it=all.keys();
@@ -180,13 +194,12 @@ public class MainActivity extends Activity {
       if(!ready[0])return;
       coverSerial++;final int serial=coverSerial;visibleCoverChecks.clear();list.removeAllViews();
       ArrayList<Dav.Item> visible=new ArrayList<>();
-      Set<String> hidden=hiddenFolders();boolean showHidden=prefs.getBoolean("show_hidden",false);
-      for(Dav.Item item:loaded)if((showHidden||!HiddenFolders.hidden(hidden,item.url))&&BrowseSearch.matches(item.name,item.dir,query.getText().toString()))visible.add(item);
+      Set<String> hidden=hiddenFolders();
+      for(Dav.Item item:loaded)if(!HiddenFolders.hidden(hidden,item.url)&&BrowseSearch.matches(item.name,item.dir,query.getText().toString()))visible.add(item);
       TitleSort titleSort=new TitleSort();
       visible.sort((a,b)->{if(a.dir!=b.dir)return a.dir?-1:1;return descending?titleSort.compare(b.name,a.name):titleSort.compare(a.name,b.name);});
       for(Dav.Item item:visible){
         JSONObject rec=record(item.url);String sub=item.dir?"フォルダ":rec.length()==0?"未読":rec.optBoolean("finished")?"既読":"途中  "+(rec.optInt("page")+1)+" / "+rec.optInt("total");
-        if(showHidden&&HiddenFolders.hidden(hidden,item.url))sub+="  [非表示設定]";
         TextView v=entry(clean(item.name),author(item.name)+"  "+sub);
         LinearLayout row=new LinearLayout(this);row.setGravity(Gravity.CENTER_VERTICAL);
         if(item.dir){
@@ -222,7 +235,7 @@ public class MainActivity extends Activity {
               });
             });
           };
-          boolean suppressCover=!showHidden&&HiddenFolders.hasDescendant(hidden,item.url);
+          boolean suppressCover=HiddenFolders.hasDescendant(hidden,item.url);
           if(suppressCover)coverStatus.setText("表紙非表示");else visibleCoverChecks.add(check);
           coverFrame.setOnClickListener(w->{if(suppressCover){folders.push(new String[]{url,name});browse(item.url,item.name);}else if(failed[0]){failed[0]=false;check.run();}else if(cover.getDrawable()!=null){folders.push(new String[]{url,name});browse(item.url,item.name);}});
         }
@@ -393,21 +406,41 @@ public class MainActivity extends Activity {
     String[] options=pair?new String[]{(first+1)+"ページ目（"+(leftToRightSpread?"左":"右")+"）",(first+2)+"ページ目（"+(leftToRightSpread?"右":"左")+"）"}:new String[]{(first+1)+"ページ目"};
     String target=manualCoverTarget,targetName=manualCoverName,source=bookUrl,sourceName=bookName;RemoteZip current=zip;
     new AlertDialog.Builder(this).setTitle("「"+clean(targetName)+"」の表紙にするページ")
-      .setItems(options,(dialog,choice)->{
-        int selected=first+choice;
-        if(manualCoverSaving)return;manualCoverSaving=true;
-        worker.execute(()->{
-          Exception failure=null;try{FolderCovers.setManual(getApplicationContext(),target,source,sourceName,selected,current);}catch(Exception e){failure=e;}
-          Exception error=failure;ui.post(()->{
-            manualCoverSaving=false;if(isFinishing()||isDestroyed())return;
-            if(error==null){
-              boolean sameTarget=target.equals(manualCoverTarget);if(sameTarget){manualCoverTarget=null;manualCoverName=null;}
-              message("「"+clean(targetName)+"」の表紙を設定しました");
-              if(sameTarget&&"reader".equals(screen)&&zip==current)render();
-            }else message("表紙を保存できません: "+(error.getMessage()==null?"不明なエラー":error.getMessage()));
-          });
-        });
-      }).setNegativeButton("キャンセル",null).show();
+      .setItems(options,(dialog,choice)->showCoverFrame(target,targetName,source,sourceName,current,first+choice,choice==0?right:left))
+      .setNegativeButton("キャンセル",null).show();
+  }
+  void showCoverFrame(String target,String targetName,String source,String sourceName,RemoteZip current,int selected,Bitmap original){
+    if(original==null||original.isRecycled()||zip!=current){message("ページをもう一度表示してください");return;}
+    Bitmap preview;
+    try{
+      float scale=Math.min(1f,Math.min(1100f/original.getWidth(),800f/original.getHeight()));
+      int w=Math.max(1,Math.round(original.getWidth()*scale)),h=Math.max(1,Math.round(original.getHeight()*scale));
+      preview=Bitmap.createBitmap(w,h,Bitmap.Config.RGB_565);
+      android.graphics.Canvas canvas=new android.graphics.Canvas(preview);canvas.drawColor(android.graphics.Color.WHITE);
+      canvas.drawBitmap(original,null,new android.graphics.Rect(0,0,w,h),new android.graphics.Paint(android.graphics.Paint.FILTER_BITMAP_FLAG));
+    }catch(OutOfMemoryError e){message("表紙のプレビューを作るメモリーが不足しています");return;}
+    CoverCropView frame=new CoverCropView(this,preview);
+    LinearLayout content=new LinearLayout(this);content.setOrientation(LinearLayout.VERTICAL);
+    content.addView(text("白い枠を左右にドラッグしてください。上下はページいっぱいで固定です。",14));
+    int height=Math.max(1,(int)Math.min(getResources().getDisplayMetrics().heightPixels*0.52f,400*getResources().getDisplayMetrics().density));
+    content.addView(frame,new LinearLayout.LayoutParams(-1,height));
+    AlertDialog dialog=new AlertDialog.Builder(this).setTitle("表紙に表示する範囲").setView(content)
+      .setNegativeButton("キャンセル",null).setPositiveButton("この範囲にする",(d,w)->saveManualCover(target,targetName,source,sourceName,current,selected,frame.position())).create();
+    dialog.setOnDismissListener(d->frame.release());dialog.show();
+  }
+  void saveManualCover(String target,String targetName,String source,String sourceName,RemoteZip current,int selected,int position){
+    if(manualCoverSaving)return;manualCoverSaving=true;
+    worker.execute(()->{
+      Exception failure=null;try{FolderCovers.setManual(getApplicationContext(),target,source,sourceName,selected,position,current);}catch(Exception e){failure=e;}
+      Exception error=failure;ui.post(()->{
+        manualCoverSaving=false;if(isFinishing()||isDestroyed())return;
+        if(error==null){
+          boolean sameTarget=target.equals(manualCoverTarget);if(sameTarget){manualCoverTarget=null;manualCoverName=null;}
+          message("「"+clean(targetName)+"」の表紙を設定しました");
+          if(sameTarget&&"reader".equals(screen)&&zip==current)render();
+        }else message("表紙を保存できません: "+(error.getMessage()==null?"不明なエラー":error.getMessage()));
+      });
+    });
   }
   void adjustFromPrevious(){
     if(zip==null)return;
@@ -470,6 +503,6 @@ public class MainActivity extends Activity {
     dialog.show();
   }
   void backPage(){if(zip==null||page<=0)return;Integer p=previous.get(page);if(p==null){jumpToPage(page-1);return;}page=p;next=0;controlsVisible=false;render();}
-  @Override public void onBackPressed(){if("home".equals(screen)){super.onBackPressed();return;}if("reader".equals(screen) && folderUrl!=null && !folderUrl.isEmpty()){browse(folderUrl,folderName);return;}if("browse".equals(screen)&&!folders.isEmpty()){String[] parent=folders.pop();browse(parent[0],parent[1]);return;}home();}
+  @Override public void onBackPressed(){if("home".equals(screen)){super.onBackPressed();return;}if("hidden".equals(screen)){settings();return;}if("reader".equals(screen) && folderUrl!=null && !folderUrl.isEmpty()){browse(folderUrl,folderName);return;}if("browse".equals(screen)&&!folders.isEmpty()){String[] parent=folders.pop();browse(parent[0],parent[1]);return;}home();}
   @Override protected void onDestroy(){generation++;coverSerial++;closeCurrentBook();worker.shutdownNow();browseWorker.shutdownNow();coverWorker.shutdownNow();thumbWorker.shutdownNow();prefetchWorker.shutdownNow();bookCloser.shutdown();clearThumbnail();release();super.onDestroy();}
 }

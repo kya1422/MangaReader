@@ -16,15 +16,16 @@ final class FolderCovers {
   private static final Object CACHE_IO=new Object();
   private static android.content.SharedPreferences choices(Context ctx){return ctx.getSharedPreferences("cover-choices",Context.MODE_PRIVATE);}
   private static String key(String folder)throws Exception{return DownloadCache.id(folder);}
-  private static File cacheFile(File dir,String folder,String book,int page)throws Exception{
-    return new File(dir,book==null?"v2-"+key(folder)+".jpg":"v3-"+key(folder)+"-"+DownloadCache.id(book+"\n"+page)+".jpg");
+  private static File cacheFile(File dir,String folder,String book,int page,int crop)throws Exception{
+    if(book==null)return new File(dir,"v2-"+key(folder)+".jpg");
+    return new File(dir,(crop<0?"v3-":"v4-")+key(folder)+"-"+DownloadCache.id(book+"\n"+page+(crop<0?"":"\n"+crop))+".jpg");
   }
   static Bitmap load(Context ctx,String folderUrl,Client client,NestedBook.Cancel cancel)throws Exception{
     File dir=new File(ctx.getFilesDir(),"folder-covers-webdav");
     if(!dir.exists()&&!dir.mkdirs())throw new IOException("表紙の保存先を作成できません");
     String key=key(folderUrl);android.content.SharedPreferences prefs=choices(ctx);
-    String book=prefs.getString(key+".book",null),name=prefs.getString(key+".name","");int page=prefs.getInt(key+".page",0);
-    File file=cacheFile(dir,folderUrl,book,page);
+    String book=prefs.getString(key+".book",null),name=prefs.getString(key+".name","");int page=prefs.getInt(key+".page",0),crop=prefs.getInt(key+".crop",-1);
+    File file=cacheFile(dir,folderUrl,book,page,crop);
     Bitmap existing=cachedFile(file);if(existing!=null)return existing;
     if(cancel.cancelled())throw new IOException("表紙取得を中止しました");
     Dav dav=client.get();
@@ -33,12 +34,12 @@ final class FolderCovers {
     Bitmap decoded;
     try{if(page<0||page>=zip.pages.size())throw new IOException("指定した表紙ページが見つかりません");decoded=zip.bitmap(page,320,220);}finally{zip.cancel();zip.close();}
     if(cancel.cancelled()){decoded.recycle();throw new IOException("表紙取得を中止しました");}
-    Bitmap small=makeSmall(decoded);try{synchronized(CACHE_IO){if(cancel.cancelled())throw new IOException("表紙取得を中止しました");write(file,small);trim(dir);}return small;}catch(Exception e){small.recycle();throw e;}
+    Bitmap small=makeSmall(decoded,crop);try{synchronized(CACHE_IO){if(cancel.cancelled())throw new IOException("表紙取得を中止しました");write(file,small);trim(dir);}return small;}catch(Exception e){small.recycle();throw e;}
   }
   static Bitmap cached(Context ctx,String folderUrl)throws Exception{
     String key=key(folderUrl);android.content.SharedPreferences prefs=choices(ctx);
-    String book=prefs.getString(key+".book",null);int page=prefs.getInt(key+".page",0);
-    return cachedFile(cacheFile(new File(ctx.getFilesDir(),"folder-covers-webdav"),folderUrl,book,page));
+    String book=prefs.getString(key+".book",null);int page=prefs.getInt(key+".page",0),crop=prefs.getInt(key+".crop",-1);
+    return cachedFile(cacheFile(new File(ctx.getFilesDir(),"folder-covers-webdav"),folderUrl,book,page,crop));
   }
   private static Bitmap cachedFile(File file){
     if(!file.isFile())return null;
@@ -46,29 +47,31 @@ final class FolderCovers {
     if(bitmap!=null){file.setLastModified(System.currentTimeMillis());return bitmap;}
     file.delete();return null;
   }
-  static void setManual(Context ctx,String folder,String book,String name,int page,RemoteZip zip)throws Exception{
+  static void setManual(Context ctx,String folder,String book,String name,int page,int crop,RemoteZip zip)throws Exception{
     File dir=new File(ctx.getFilesDir(),"folder-covers-webdav");if(!dir.exists()&&!dir.mkdirs())throw new IOException("表紙の保存先を作成できません");
-    Bitmap small=makeSmall(zip.bitmap(page,320,220));
+    if(crop<0||crop>10000)throw new IllegalArgumentException("表紙位置が不正です");
+    Bitmap small=makeSmall(zip.bitmap(page,320,220),crop);
     try{
-      File file=cacheFile(dir,folder,book,page);
+      File file=cacheFile(dir,folder,book,page,crop);
       synchronized(CACHE_IO){
         write(file,small);String key=key(folder);
-        if(!choices(ctx).edit().putString(key+".book",book).putString(key+".name",name).putInt(key+".page",page).commit())throw new IOException("表紙設定を保存できません");
+        if(!choices(ctx).edit().putString(key+".book",book).putString(key+".name",name).putInt(key+".page",page).putInt(key+".crop",crop).commit())throw new IOException("表紙設定を保存できません");
         trim(dir);
       }
     }finally{small.recycle();}
   }
   static void clearManual(Context ctx,String folder)throws Exception{
-    String key=key(folder);if(!choices(ctx).edit().remove(key+".book").remove(key+".name").remove(key+".page").commit())throw new IOException("表紙設定を解除できません");
+    String key=key(folder);if(!choices(ctx).edit().remove(key+".book").remove(key+".name").remove(key+".page").remove(key+".crop").commit())throw new IOException("表紙設定を解除できません");
   }
-  private static Bitmap makeSmall(Bitmap decoded){
+  private static Bitmap makeSmall(Bitmap decoded,int crop){
     try{
-      int cropWidth=CoverCrop.leftWidth(decoded.getWidth(),decoded.getHeight());
+      int cropWidth=crop<0?CoverCrop.leftWidth(decoded.getWidth(),decoded.getHeight()):CoverCrop.manualWidth(decoded.getWidth(),decoded.getHeight());
+      int left=crop<0?0:CoverCrop.manualLeft(decoded.getWidth(),decoded.getHeight(),crop);
       float scale=Math.min(1f,Math.min(160f/cropWidth,220f/decoded.getHeight()));
       int w=Math.max(1,Math.round(cropWidth*scale)),h=Math.max(1,Math.round(decoded.getHeight()*scale));
       Bitmap small=Bitmap.createBitmap(w,h,Bitmap.Config.RGB_565);
       Canvas canvas=new Canvas(small);canvas.drawColor(android.graphics.Color.WHITE);
-      canvas.drawBitmap(decoded,new Rect(0,0,cropWidth,decoded.getHeight()),new Rect(0,0,w,h),new Paint(Paint.FILTER_BITMAP_FLAG));
+      canvas.drawBitmap(decoded,new Rect(left,0,left+cropWidth,decoded.getHeight()),new Rect(0,0,w,h),new Paint(Paint.FILTER_BITMAP_FLAG));
       return small;
     }finally{decoded.recycle();}
   }
