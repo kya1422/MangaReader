@@ -16,9 +16,4 @@ final class SmbWifi {
       return expected.equals(ssid);
     }catch(SecurityException e){return false;}
   }
-  static boolean privateIpv4(String host){
-    if(host==null||!host.matches("(?:[0-9]{1,3}\\.){3}[0-9]{1,3}"))return false;
-    String[] a=host.split("\\.");int[] n=new int[4];for(int i=0;i<4;i++){n[i]=Integer.parseInt(a[i]);if(n[i]>255)return false;}
-    return n[0]==10||(n[0]==172&&n[1]>=16&&n[1]<=31)||(n[0]==192&&n[1]==168);
-  }
 }

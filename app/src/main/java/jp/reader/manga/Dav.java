@@ -21,8 +21,8 @@ final class Dav {
     android.content.SharedPreferences preferences=c.getSharedPreferences("reader",Context.MODE_PRIVATE);
     String host=preferences.getString("smb_host",""),share=preferences.getString("smb_share",""),username=preferences.getString("smb_user","");smbSsid=preferences.getString("smb_ssid","");
     SmbBackend candidate=null;
-    if(preferences.getBoolean("smb_enabled",false)&&SmbWifi.privateIpv4(host)&&!share.isEmpty()&&!username.isEmpty()&&SmbWifi.matches(c,smbSsid)){
-      try{String password=SmbPasswordStore.read(preferences);candidate=new SmbBackend(b,host,445,share,username,password.toCharArray(),"");}catch(Exception ignored){/* invalid SMB settings: keep WebDAV available */}
+    if(preferences.getBoolean("smb_enabled",false)&&SmbAddress.privateIpv4(host)&&!share.isEmpty()&&!username.isEmpty()&&SmbWifi.matches(c,smbSsid)){
+      try{String password=SmbPasswordStore.read(preferences);candidate=new SmbBackend(b,host,445,share,username,password.toCharArray(),"");}catch(Exception|LinkageError ignored){/* invalid SMB settings: keep WebDAV available */}
     }
     smb=candidate;
     if(smb!=null){
@@ -54,11 +54,11 @@ final class Dav {
     if(routeSelected){if(usingSmb&&!SmbWifi.matches(ctx,smbSsid)){if(transferStarted)throw new IOException("指定Wi-Fiから切断されました。本を開き直してください");usingSmb=false;}return usingSmb;}
     if(Thread.currentThread().isInterrupted())throw new InterruptedException("接続を中止しました");
     if(smb!=null&&SmbWifi.matches(ctx,smbSsid)){
-      try{smb.list(base);usingSmb=true;}catch(Exception e){if(Thread.currentThread().isInterrupted())throw e;usingSmb=false;}
+      try{smb.list(base);usingSmb=true;}catch(Exception|LinkageError e){if(Thread.currentThread().isInterrupted())throw new IOException("接続を中止しました",e);usingSmb=false;}
     }
     routeSelected=true;return usingSmb;
   }
-  String connectionName(){return !routeSelected?"接続を確認中":usingSmb?"自宅Samba":"WebDAV";}
+  String connectionName(){return !routeSelected?"端末保存または未判定":usingSmb?"自宅Samba":"WebDAV";}
   static final class Download implements Closeable {
     final InputStream stream;final long length;final Closeable closeable;
     Download(InputStream s,long n,Closeable c){stream=s;length=n;closeable=c;}
@@ -68,7 +68,7 @@ final class Dav {
     synchronized(this){
       if(useSmb()){
         try{SmbBackend.Download d=smb.download(url);register.accept(d);transferStarted=true;return new Download(d.stream,d.length,d);}
-        catch(Exception e){if(transferStarted||Thread.currentThread().isInterrupted())throw e;usingSmb=false;}
+        catch(Exception|LinkageError e){if(transferStarted||Thread.currentThread().isInterrupted())throw new IOException("Sambaに接続できません",e);usingSmb=false;}
       }
     }
     HttpURLConnection c=open(url,"GET");Closeable closer=()->c.disconnect();register.accept(closer);
@@ -86,7 +86,7 @@ final class Dav {
   List<Item> list(String url) throws Exception {
     synchronized(this){if(useSmb()){
       try{List<Item> entries=new ArrayList<>();for(SmbBackend.Entry e:smb.list(url))entries.add(new Item(knownUrl(e.url),e.name,e.directory,e.createdAt));return entries;}
-      catch(Exception e){if(transferStarted||Thread.currentThread().isInterrupted())throw e;usingSmb=false;}
+      catch(Exception|LinkageError e){if(transferStarted||Thread.currentThread().isInterrupted())throw new IOException("Sambaに接続できません",e);usingSmb=false;}
     }}
     URL root=new URL(base), targetUrl=new URL(url); if(!"https".equals(targetUrl.getProtocol()) || !root.getHost().equalsIgnoreCase(targetUrl.getHost()) || root.getPort()!=targetUrl.getPort()) throw new IOException("接続先が不正です");
     okhttp3.OkHttpClient.Builder builder=SHARED_CLIENT.newBuilder();
@@ -111,7 +111,7 @@ final class Dav {
     if(cached!=null){try(RandomAccessFile f=new RandomAccessFile(cached,"r")){long total=f.length();long first=start<0?Math.max(0,total-end):start;long last=start<0?total-1:Math.min(end,total-1);if(first<0||last<first||last-first+1>33L*1024*1024)throw new IOException("保存ファイルの範囲が不正です");byte[] bytes=new byte[(int)(last-first+1)];f.seek(first);f.readFully(bytes);return new Range(bytes,total);}catch(FileNotFoundException ignored){/* deleted concurrently: use network */}}
     synchronized(this){if(useSmb()){
       try{SmbBackend.Range result=smb.range(u,start,end);transferStarted=true;return new Range(result.data,result.total);}
-      catch(Exception e){if(transferStarted||Thread.currentThread().isInterrupted())throw e;usingSmb=false;}
+      catch(Exception|LinkageError e){if(transferStarted||Thread.currentThread().isInterrupted())throw new IOException("Sambaに接続できません",e);usingSmb=false;}
     }}
     HttpURLConnection c=open(u,"GET");c.setRequestProperty("Range",start<0?"bytes=-"+end:"bytes="+start+"-"+end);
     try {int code=c.getResponseCode();if(code!=206)throw new IOException(HttpErrors.range(code));
