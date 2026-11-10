@@ -18,7 +18,7 @@ import java.util.concurrent.*;
 public class MainActivity extends Activity {
   android.content.SharedPreferences prefs; ExecutorService worker=Executors.newFixedThreadPool(2); final ExecutorService browseWorker=Executors.newFixedThreadPool(2); Handler ui=new Handler(Looper.getMainLooper()); volatile int generation=0; LinearLayout root; Dav dav; RemoteZip zip; String bookUrl,bookName,folderUrl,folderName; int page=0,next=0; boolean reading=false; HashMap<Integer,Integer> previous=new HashMap<>(); TreeSet<Integer> cuts=new TreeSet<>(); Bitmap right,left; String alias=""; String downloadState=""; TextView downloadLabel; boolean controlsVisible=false; boolean leftToRightSpread=false; final ExecutorService thumbWorker=Executors.newSingleThreadExecutor(); final ArrayList<ImageView> thumbnailViews=new ArrayList<>(); final ArrayList<Bitmap> thumbnailBitmaps=new ArrayList<>(); volatile int previewSerial=0; Runnable previewPending; final ExecutorService prefetchWorker=Executors.newSingleThreadExecutor(); boolean prefetchRequested=false; String prefetchStatus=""; TextView prefetchLabel; JSONObject recordCache; String screen="home"; final ArrayDeque<String[]> folders=new ArrayDeque<>();
   String manualCoverTarget,manualCoverName; boolean manualCoverSaving;
-  final ExecutorService coverWorker=Executors.newSingleThreadExecutor(); final ExecutorService bookCloser=Executors.newSingleThreadExecutor(); volatile int coverSerial=0;
+  final CoverDispatcher coverWorker=new CoverDispatcher(); final ExecutorService bookCloser=Executors.newSingleThreadExecutor(); volatile int coverSerial=0;
   void closeBookAsync(RemoteZip book){
     if(book==null)return;book.cancel();
     try{bookCloser.execute(book::close);}catch(java.util.concurrent.RejectedExecutionException e){Thread t=new Thread(book::close,"close-book");t.setDaemon(true);t.start();}
@@ -146,7 +146,7 @@ public class MainActivity extends Activity {
     Button coverToggle=button("",()->{});coverBar.addView(coverToggle);
     coverBar.addView(button("表紙を再取得",()->new AlertDialog.Builder(this).setTitle("表紙を再取得")
       .setMessage("保存した表紙画像を削除し、表示中のフォルダから順次取得し直します。手動で選んだページの設定、漫画ファイルや履歴は削除しません。")
-      .setNegativeButton("キャンセル",null).setPositiveButton("再取得",(d,w)->{coverSerial++;final int screenGeneration=generation;coverWorker.execute(()->{FolderCovers.clear(getApplicationContext());ui.post(()->{if(screenGeneration==generation && "browse".equals(screen))browse(url,name);});});}).show()));
+      .setNegativeButton("キャンセル",null).setPositiveButton("再取得",(d,w)->{coverSerial++;final int screenGeneration=generation;coverWorker.executeCache(()->{FolderCovers.clear(getApplicationContext());ui.post(()->{if(screenGeneration==generation && "browse".equals(screen))browse(url,name);});});}).show()));
     root.addView(coverBar);
     LinearLayout list=scroll();ScrollView coverScroll=(ScrollView)list.getParent();
     TextView status=text("読み込み中…",16);list.addView(status);
@@ -196,14 +196,12 @@ public class MainActivity extends Activity {
             if(pending[0]||failed[0]||cover.getDrawable()!=null)return;
             pending[0]=true;coverStatus.setText("待機中…");
             java.util.concurrent.atomic.AtomicBoolean cancelled=new java.util.concurrent.atomic.AtomicBoolean();active[0]=cancelled;
-            coverWorker.execute(()->{Bitmap image=null;String error=null;
-              try{
-                if(!cancelled.get()&&serial==coverSerial){
-                  ui.post(()->{if(serial==coverSerial&&!cancelled.get())coverStatus.setText("取得中…");});
-                  image=FolderCovers.load(getApplicationContext(),item.url,()->client(),()->cancelled.get()||serial!=coverSerial||Thread.currentThread().isInterrupted());
-                }
-              }catch(Exception e){error=e instanceof NestedBook.Limit?"探索上限":e.getMessage();if(error==null||error.isEmpty())error="通信エラー";}
-              final Bitmap result=image;final String failure=error;
+            coverWorker.submit(()->cancelled.get()||serial!=coverSerial||Thread.currentThread().isInterrupted(),
+              ()->FolderCovers.cached(getApplicationContext(),item.url),
+              ()->FolderCovers.load(getApplicationContext(),item.url,()->client(),()->cancelled.get()||serial!=coverSerial||Thread.currentThread().isInterrupted()),
+              ()->ui.post(()->{if(serial==coverSerial&&!cancelled.get())coverStatus.setText("取得中…");}),
+              (result,error)->{
+              final String failure=error==null?null:error instanceof NestedBook.Limit?"探索上限":error.getMessage()==null||error.getMessage().isEmpty()?"通信エラー":error.getMessage();
               ui.post(()->{
                 pending[0]=false;active[0]=null;
                 if(serial!=coverSerial){if(result!=null)result.recycle();return;}
