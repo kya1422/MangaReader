@@ -14,6 +14,11 @@ class TestSpread {
    Set<Integer> prevCut=new HashSet<>();prevCut.add(3);
    boolean[] portrait=new boolean[8];
    check(SpreadPlanner.containing(4,8,prevCut,i->portrait[i])==3 && SpreadPlanner.containing(5,8,prevCut,i->portrait[i])==5,"previous page joins current after adjustment");
+   check(SpreadPlanner.paired(1,wide.length,Collections.emptySet(),o),"two portrait pages use half width");
+   check(!SpreadPlanner.paired(4,wide.length,Collections.emptySet(),o),"portrait before wide uses full width");
+   check(!SpreadPlanner.paired(1,wide.length,cuts,o),"cut makes portrait full width");
+   check(!SpreadPlanner.paired(8,wide.length,Collections.emptySet(),o),"last portrait uses full width");
+   check(!SpreadPlanner.paired(0,wide.length,Collections.emptySet(),o),"wide page uses full width");
    Random random=new Random(7);
    for(int test=0;test<1000;test++){
      boolean[] dimensions=new boolean[1+random.nextInt(100)];Set<Integer> boundaries=new HashSet<>();

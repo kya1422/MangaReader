@@ -226,6 +226,7 @@ public class MainActivity extends Activity {
       zip=z;if(rec.optInt("orientationCount",-1)==z.pages.size()&&rec.optLong("orientationLength",-1)==z.archiveLength)z.orientations.putAll(OrientationCodec.decode(z.pages.size(),rec.optString("orientations","")));
       page=Math.max(0,Math.min(page,zip.pages.size()-1));render();
     },error->{
+      if(error instanceof RemoteRar.UnsupportedRar)DownloadCache.delete(this,url);
       DownloadCache.pin(null);loading.setText("本を開けませんでした: "+(error.getMessage()==null?"不明なエラー":error.getMessage()));
       root.addView(button("再試行",()->openBook(url,name,folder,fname)));
       root.addView(button("フォルダに戻る",()->{if(folder==null||folder.isEmpty())home();else browse(folder,fname);}));
@@ -319,9 +320,10 @@ public class MainActivity extends Activity {
     if(controlsVisible)scheduleGallery(current,page,strip,scroller,caption);
     int width=getResources().getDisplayMetrics().widthPixels,height=getResources().getDisplayMetrics().heightPixels;
     async(()->{
-      boolean wide=current.isWide(requested);int pageWidth=wide?width:Math.max(1,width/2);
+      boolean pair=SpreadPlanner.paired(requested,current.pages.size(),anchors,current::isWide);
+      int pageWidth=pair?Math.max(1,width/2):width;
       Bitmap a=current.bitmap(requested,pageWidth,height);Bitmap b=null;int n=requested+1;
-      if(!wide&&n<current.pages.size()&&!anchors.contains(n)){try{if(!current.isWide(n)){b=current.bitmap(n,Math.max(1,width/2),height);n++;}}catch(Exception e){a.recycle();throw e;}}
+      if(pair){try{b=current.bitmap(n,pageWidth,height);n++;}catch(Exception e){a.recycle();throw e;}}
       return new Spread(a,b,n);
     },s->{
       release();right=s.a;left=s.b;next=s.next;status.setText((page+1)+(next>page+1?"–"+next:"")+" / "+zip.pages.size());
