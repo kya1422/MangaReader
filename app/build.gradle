@@ -36,5 +36,6 @@ android {
 
 dependencies {
     implementation 'com.squareup.okhttp3:okhttp:4.12.0'
+    implementation 'com.hierynomus:smbj:0.15.0'
     implementation 'com.github.junrar:junrar:8.1.2'
 }

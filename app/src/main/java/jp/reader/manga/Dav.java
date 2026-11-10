@@ -15,8 +15,23 @@ final class Dav {
   private static final okhttp3.OkHttpClient SHARED_CLIENT=new okhttp3.OkHttpClient.Builder().followRedirects(false).followSslRedirects(false).connectTimeout(20,java.util.concurrent.TimeUnit.SECONDS).readTimeout(30,java.util.concurrent.TimeUnit.SECONDS).build();
   static final class Item { String url,name; boolean dir; long createdAt; Item(String u,String n,boolean d){this(u,n,d,0);} Item(String u,String n,boolean d,long c){url=u;name=n;dir=d;createdAt=c;} }
   final Context ctx; final String base,user,pass,alias; final SSLSocketFactory ssl; final X509TrustManager trust;
+  private final SmbBackend smb;private final String smbSsid;private volatile boolean routeSelected,usingSmb;private boolean transferStarted;private final Map<String,String> knownUrls=new HashMap<>();
   Dav(Context c,String b,String u,String p,String a) throws Exception {
     ctx=c; base=b; user=u; pass=p; alias=a;
+    android.content.SharedPreferences preferences=c.getSharedPreferences("reader",Context.MODE_PRIVATE);
+    String host=preferences.getString("smb_host",""),share=preferences.getString("smb_share",""),username=preferences.getString("smb_user","");smbSsid=preferences.getString("smb_ssid","");
+    SmbBackend candidate=null;
+    if(preferences.getBoolean("smb_enabled",false)&&SmbWifi.privateIpv4(host)&&!share.isEmpty()&&!username.isEmpty()&&SmbWifi.matches(c,smbSsid)){
+      try{String password=SmbPasswordStore.read(preferences);candidate=new SmbBackend(b,host,445,share,username,password.toCharArray(),"");}catch(Exception ignored){/* invalid SMB settings: keep WebDAV available */}
+    }
+    smb=candidate;
+    if(smb!=null){
+      rememberUrl(b);
+      try{org.json.JSONObject records=new org.json.JSONObject(preferences.getString("records","{}"));Iterator<String> keys=records.keys();while(keys.hasNext()){
+        String key=keys.next();rememberUrl(key);org.json.JSONObject entry=records.optJSONObject(key);if(entry!=null){rememberUrl(entry.optString("url",""));rememberUrl(entry.optString("folder",""));}
+      }}catch(Exception ignored){}
+      for(String url:preferences.getStringSet("hidden_folders",Collections.emptySet()))rememberUrl(url);
+    }
     if (!"https".equalsIgnoreCase(new URL(b).getProtocol())) throw new IOException("HTTPSのURLを指定してください");
     TrustManagerFactory tmf=TrustManagerFactory.getInstance(TrustManagerFactory.getDefaultAlgorithm()); tmf.init((KeyStore)null); trust=(X509TrustManager)tmf.getTrustManagers()[0];
     if(a==null || a.isEmpty()) {ssl=null;return;}
@@ -33,6 +48,33 @@ final class Dav {
     };
     SSLContext sc=SSLContext.getInstance("TLS"); sc.init(new KeyManager[]{km},null,null);ssl=sc.getSocketFactory();
   }
+  private void rememberUrl(String url){try{if(url!=null&&!url.isEmpty())knownUrls.putIfAbsent(smb.relative(url),url);}catch(Exception ignored){}}
+  private String knownUrl(String url){try{String original=knownUrls.get(smb.relative(url));return original==null?url:original;}catch(Exception ignored){return url;}}
+  private synchronized boolean useSmb() throws Exception {
+    if(routeSelected){if(usingSmb&&!SmbWifi.matches(ctx,smbSsid)){if(transferStarted)throw new IOException("指定Wi-Fiから切断されました。本を開き直してください");usingSmb=false;}return usingSmb;}
+    if(Thread.currentThread().isInterrupted())throw new InterruptedException("接続を中止しました");
+    if(smb!=null&&SmbWifi.matches(ctx,smbSsid)){
+      try{smb.list(base);usingSmb=true;}catch(Exception e){if(Thread.currentThread().isInterrupted())throw e;usingSmb=false;}
+    }
+    routeSelected=true;return usingSmb;
+  }
+  String connectionName(){return !routeSelected?"接続を確認中":usingSmb?"自宅Samba":"WebDAV";}
+  static final class Download implements Closeable {
+    final InputStream stream;final long length;final Closeable closeable;
+    Download(InputStream s,long n,Closeable c){stream=s;length=n;closeable=c;}
+    public void close()throws IOException{closeable.close();}
+  }
+  Download openDownload(String url,java.util.function.Consumer<Closeable> register)throws Exception{
+    synchronized(this){
+      if(useSmb()){
+        try{SmbBackend.Download d=smb.download(url);register.accept(d);transferStarted=true;return new Download(d.stream,d.length,d);}
+        catch(Exception e){if(transferStarted||Thread.currentThread().isInterrupted())throw e;usingSmb=false;}
+      }
+    }
+    HttpURLConnection c=open(url,"GET");Closeable closer=()->c.disconnect();register.accept(closer);
+    try{int code=c.getResponseCode();if(code!=200)throw new IOException("HTTP "+code);InputStream stream=c.getInputStream();return new Download(stream,c.getContentLengthLong(),()->{try{stream.close();}finally{c.disconnect();}});}
+    catch(Exception e){c.disconnect();throw e;}
+  }
   HttpURLConnection open(String u,String method) throws Exception {
     URL original=new URL(base), target=new URL(u);
     if(!"https".equalsIgnoreCase(target.getProtocol()) || !original.getHost().equalsIgnoreCase(target.getHost()) || original.getPort()!=target.getPort()) throw new IOException("設定したWebDAV以外への接続は許可されません");
@@ -42,6 +84,10 @@ final class Dav {
   }
   static byte[] read(InputStream in,int max) throws IOException { try(InputStream s=in;ByteArrayOutputStream o=new ByteArrayOutputStream()){byte[] b=new byte[16384];int n,total=0;while((n=s.read(b))!=-1){total+=n;if(total>max)throw new IOException("データが上限を超えました");o.write(b,0,n);}return o.toByteArray();} }
   List<Item> list(String url) throws Exception {
+    synchronized(this){if(useSmb()){
+      try{List<Item> entries=new ArrayList<>();for(SmbBackend.Entry e:smb.list(url))entries.add(new Item(knownUrl(e.url),e.name,e.directory,e.createdAt));return entries;}
+      catch(Exception e){if(transferStarted||Thread.currentThread().isInterrupted())throw e;usingSmb=false;}
+    }}
     URL root=new URL(base), targetUrl=new URL(url); if(!"https".equals(targetUrl.getProtocol()) || !root.getHost().equalsIgnoreCase(targetUrl.getHost()) || root.getPort()!=targetUrl.getPort()) throw new IOException("接続先が不正です");
     okhttp3.OkHttpClient.Builder builder=SHARED_CLIENT.newBuilder();
     if(ssl!=null)builder.sslSocketFactory(ssl,trust);
@@ -63,6 +109,10 @@ final class Dav {
   Range range(String u,long start,long end) throws Exception {
     File cached=DownloadCache.available(ctx,u);
     if(cached!=null){try(RandomAccessFile f=new RandomAccessFile(cached,"r")){long total=f.length();long first=start<0?Math.max(0,total-end):start;long last=start<0?total-1:Math.min(end,total-1);if(first<0||last<first||last-first+1>33L*1024*1024)throw new IOException("保存ファイルの範囲が不正です");byte[] bytes=new byte[(int)(last-first+1)];f.seek(first);f.readFully(bytes);return new Range(bytes,total);}catch(FileNotFoundException ignored){/* deleted concurrently: use network */}}
+    synchronized(this){if(useSmb()){
+      try{SmbBackend.Range result=smb.range(u,start,end);transferStarted=true;return new Range(result.data,result.total);}
+      catch(Exception e){if(transferStarted||Thread.currentThread().isInterrupted())throw e;usingSmb=false;}
+    }}
     HttpURLConnection c=open(u,"GET");c.setRequestProperty("Range",start<0?"bytes=-"+end:"bytes="+start+"-"+end);
     try {int code=c.getResponseCode();if(code!=206)throw new IOException(HttpErrors.range(code));
       String cr=c.getHeaderField("Content-Range");if(cr==null||!cr.matches("bytes \\d+-\\d+/\\d+"))throw new IOException("Content-Rangeが不正です");String[] p=cr.substring(6).split("[-/]");long first=Long.parseLong(p[0]),last=Long.parseLong(p[1]),total=Long.parseLong(p[2]);long expectedStart=start<0?Math.max(0,total-end):start; long expectedEnd=start<0?total-1:Math.min(end,total-1);

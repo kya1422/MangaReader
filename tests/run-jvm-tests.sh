@@ -50,3 +50,6 @@ java -Dfile.encoding=UTF-8 -cp "$tmp/davxml" jp.reader.manga.TestDavXml
 mkdir -p "$tmp/arrivals"
 javac -encoding UTF-8 -d "$tmp/arrivals" $(find tests/zip/src -name '*.java' ! -name TestMain.java) app/src/main/java/jp/reader/manga/{NewArrivals,HiddenFolders,NestedBook,FirstBook,RemoteZip,JpegHeader,PngHeader,ZipNames}.java tests/arrivals/src/jp/reader/manga/TestArrivals.java
 java -Dfile.encoding=UTF-8 -cp "$tmp/arrivals" jp.reader.manga.TestArrivals
+mkdir -p "$tmp/smbpath"
+javac -encoding UTF-8 -d "$tmp/smbpath" $(find tests/zip/src -name '*.java' ! -name TestMain.java) app/src/main/java/jp/reader/manga/{SmbPathMap,NestedBook,FirstBook,RemoteZip,JpegHeader,PngHeader,ZipNames}.java tests/smbpath/src/jp/reader/manga/TestSmbPathMap.java
+java -Dfile.encoding=UTF-8 -cp "$tmp/smbpath" jp.reader.manga.TestSmbPathMap
