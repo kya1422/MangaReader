@@ -41,3 +41,6 @@ java -Dfile.encoding=UTF-8 -cp "$tmp/coverwindow" jp.reader.manga.TestCoverWindo
 mkdir -p "$tmp/coverdispatch"
 javac -encoding UTF-8 -d "$tmp/coverdispatch" tests/coverdispatch/src/jp/reader/manga/TestCoverDispatcher.java app/src/main/java/jp/reader/manga/CoverDispatcher.java
 java -Dfile.encoding=UTF-8 -cp "$tmp/coverdispatch" jp.reader.manga.TestCoverDispatcher
+mkdir -p "$tmp/hidden"
+javac -encoding UTF-8 -d "$tmp/hidden" $(find tests/zip/src -name '*.java' ! -name TestMain.java) app/src/main/java/jp/reader/manga/{HiddenFolders,NestedBook,FirstBook,RemoteZip,JpegHeader,PngHeader,ZipNames}.java tests/hidden/src/jp/reader/manga/TestHidden.java
+java -Dfile.encoding=UTF-8 -cp "$tmp/hidden" jp.reader.manga.TestHidden

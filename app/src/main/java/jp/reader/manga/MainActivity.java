@@ -87,9 +87,16 @@ public class MainActivity extends Activity {
   JSONObject records(){if(recordCache==null){try{recordCache=new JSONObject(prefs.getString("records","{}"));}catch(Exception e){recordCache=new JSONObject();}}return recordCache;}
   void put(String key,JSONObject value){try{JSONObject all=records();all.put(key,value);prefs.edit().putString("records",all.toString()).apply();}catch(Exception e){message(e.toString());}}
   JSONObject record(String key){JSONObject j=records().optJSONObject(key);return j==null?new JSONObject():j;}
+  Set<String> hiddenFolders(){return new HashSet<>(prefs.getStringSet("hidden_folders",Collections.emptySet()));}
+  boolean hiddenItem(String url){return !prefs.getBoolean("show_hidden",false)&&HiddenFolders.hidden(hiddenFolders(),url);}
+  boolean hiddenRecord(JSONObject o){return hiddenItem(o.optString("folder"))||hiddenItem(o.optString("url"));}
+  void setHiddenFolder(String url,boolean hide){
+    Set<String> all=hiddenFolders();all.removeIf(old->HiddenFolders.contains(old,url)&&HiddenFolders.contains(url,old));
+    if(hide)all.add(url);prefs.edit().putStringSet("hidden_folders",all).apply();
+  }
   String clean(String s){return TitleSort.displayTitle(s);}
   String author(String s){java.util.regex.Matcher m=java.util.regex.Pattern.compile("\\[([^]]+)\\]").matcher(s);return m.find()?m.group(1):"";}
-  void home(){manualCoverTarget=null;manualCoverName=null;screen="home";folders.clear();DownloadCache.pin(null);DownloadCache.cleanup(this);reading=false;closeCurrentBook();clear();release();root.addView(text("漫画リーダー",25));LinearLayout bar=new LinearLayout(this);bar.addView(button("フォルダ",()->browse(prefs.getString("url",""),"フォルダ")));bar.addView(button("接続設定",this::settings));root.addView(bar);LinearLayout list=scroll();JSONObject all=records();ArrayList<JSONObject> recent=new ArrayList<>();Iterator<String> keys=all.keys();while(keys.hasNext()){JSONObject o=all.optJSONObject(keys.next());if(o!=null&&!o.optBoolean("finished"))recent.add(o);}recent.sort((a,b)->Long.compare(b.optLong("time"),a.optLong("time")));
+  void home(){manualCoverTarget=null;manualCoverName=null;screen="home";folders.clear();DownloadCache.pin(null);DownloadCache.cleanup(this);reading=false;closeCurrentBook();clear();release();root.addView(text("漫画リーダー",25));LinearLayout bar=new LinearLayout(this);bar.addView(button("フォルダ",()->browse(prefs.getString("url",""),"フォルダ")));bar.addView(button("接続設定",this::settings));root.addView(bar);LinearLayout list=scroll();JSONObject all=records();ArrayList<JSONObject> recent=new ArrayList<>();Iterator<String> keys=all.keys();while(keys.hasNext()){JSONObject o=all.optJSONObject(keys.next());if(o!=null&&!o.optBoolean("finished")&&!hiddenRecord(o))recent.add(o);}recent.sort((a,b)->Long.compare(b.optLong("time"),a.optLong("time")));
     list.addView(text("最近読んだ本",21));if(recent.isEmpty())list.addView(text("読みかけの本はありません",14));for(JSONObject o:recent){String name=o.optString("name"),url=o.optString("url"),fu=o.optString("folder"),fn=o.optString("folderName");TextView v=entry(clean(name),author(name)+"  途中 "+(o.optInt("page")+1)+" / "+o.optInt("total"));list.addView(v);v.setOnClickListener(w->openBook(url,name,fu,fn));}
     list.addView(text("読みかけのシリーズ",21));HashSet<String> seen=new HashSet<>();ArrayList<JSONObject> series=new ArrayList<>();for(JSONObject o:recent)if(seen.add(o.optString("folder")))series.add(o);
     String sort=prefs.getString("sort","最近読んだ順");if(sort.equals("タイトル順")){TitleSort ts=new TitleSort();series.sort((a,b)->ts.compare(a.optString("folderName"),b.optString("folderName")));}else if(sort.equals("著者順"))series.sort((a,b)->RemoteZip.natural(author(a.optString("folderName")),author(b.optString("folderName"))));
@@ -99,11 +106,12 @@ public class MainActivity extends Activity {
   void settings(){screen="settings";alias=prefs.getString("alias","");clear();root.addView(button("← ホーム",this::home));root.addView(text("WebDAV接続設定",23));LinearLayout l=scroll();EditText u=new EditText(this),n=new EditText(this),p=new EditText(this);u.setHint("https://example.com/webdav/");u.setSingleLine();u.setText(prefs.getString("url",""));n.setHint("ユーザー名（必要な場合）");n.setText(prefs.getString("user",""));p.setHint("パスワード（端末内に保存）");p.setInputType(129);try{p.setText(PasswordStore.read(prefs));}catch(Exception e){message("保存したパスワードを読み込めません。再入力して保存してください。");}l.addView(u);l.addView(n);l.addView(p);TextView cert=text("証明書: "+(alias.isEmpty()?"未選択":alias),15);l.addView(cert);l.addView(button("証明書をインストール",()->{try{startActivityForResult(KeyChain.createInstallIntent(),102);}catch(Exception e){message("証明書インストール画面を開けません: "+e.getMessage());}}));l.addView(button("インストール済み証明書を選択",()->{try{KeyChain.choosePrivateKeyAlias(this,a->ui.post(()->{if(a!=null){alias=a;cert.setText("証明書: "+a);}else message("証明書が選択されませんでした。端末にクライアント証明書をインストールしてください。");}),null,null,null,-1,alias.isEmpty()?null:alias);}catch(Exception e){message("証明書選択画面を開けません: "+e.getMessage());}}));l.addView(button("証明書を解除",()->{alias="";cert.setText("証明書: 未選択");}));l.addView(text("PKCS#12（.p12/.pfx）を端末にインストール後、インストール済み証明書を選択し、最後に保存を押してください。WebDAVパスワードはAndroid Keystoreの鍵で暗号化して保存します。",14));l.addView(button("保存パスワードをリセット",()->new AlertDialog.Builder(this).setTitle("保存パスワードのリセット")
       .setMessage("保存済みパスワードと暗号化鍵を削除します。次回接続には再入力が必要です。クライアント証明書は削除しません。")
       .setNegativeButton("キャンセル",null).setPositiveButton("削除",(d,w)->{try{PasswordStore.reset(prefs);p.setText("");message("パスワードをリセットしました。再入力して保存してください。");}catch(Exception e){message("リセットに失敗しました: "+e.getMessage());}}).show()));
+    CheckBox showHidden=new CheckBox(this);showHidden.setText("非表示にしたフォルダを表示する（パスコードなし）");showHidden.setChecked(prefs.getBoolean("show_hidden",false));showHidden.setOnCheckedChangeListener((button,checked)->prefs.edit().putBoolean("show_hidden",checked).apply());l.addView(showHidden);
     CheckBox prefetch=new CheckBox(this);prefetch.setText("読み終わる前に次巻をダウンロード（90％付近）");prefetch.setChecked(prefs.getBoolean("prefetch_next",true));l.addView(prefetch);l.addView(button("閲覧履歴を管理",this::history));l.addView(button("アプリの更新を確認",this::checkUpdate));l.addView(button("保存",()->{String url=u.getText().toString().trim();if(!url.startsWith("https://")){message("HTTPSのURLを入力してください");return;}if(!url.endsWith("/"))url+="/";try{PasswordStore.write(prefs,p.getText().toString());}catch(Exception e){message("パスワードを安全に保存できませんでした。設定は保存されていません。");return;}prefs.edit().putString("url",url).putString("user",n.getText().toString()).putString("alias",alias).putBoolean("prefetch_next",prefetch.isChecked()).apply();home();}));}
   void history(){
     screen="history";clear();root.addView(button("← ホーム",this::home));root.addView(text("閲覧履歴（タップして削除）",23));
     LinearLayout list=scroll();JSONObject all=records();ArrayList<JSONObject> entries=new ArrayList<>();Iterator<String> it=all.keys();
-    while(it.hasNext()){JSONObject o=all.optJSONObject(it.next());if(o!=null)entries.add(o);}
+    while(it.hasNext()){JSONObject o=all.optJSONObject(it.next());if(o!=null&&!hiddenRecord(o))entries.add(o);}
     entries.sort((a,b)->Long.compare(b.optLong("time"),a.optLong("time")));
     if(entries.isEmpty())list.addView(text("履歴はありません",16));
     for(JSONObject o:entries){String url=o.optString("url"),name=o.optString("name");
@@ -172,11 +180,13 @@ public class MainActivity extends Activity {
       if(!ready[0])return;
       coverSerial++;final int serial=coverSerial;visibleCoverChecks.clear();list.removeAllViews();
       ArrayList<Dav.Item> visible=new ArrayList<>();
-      for(Dav.Item item:loaded)if(BrowseSearch.matches(item.name,item.dir,query.getText().toString()))visible.add(item);
+      Set<String> hidden=hiddenFolders();boolean showHidden=prefs.getBoolean("show_hidden",false);
+      for(Dav.Item item:loaded)if((showHidden||!HiddenFolders.hidden(hidden,item.url))&&BrowseSearch.matches(item.name,item.dir,query.getText().toString()))visible.add(item);
       TitleSort titleSort=new TitleSort();
       visible.sort((a,b)->{if(a.dir!=b.dir)return a.dir?-1:1;return descending?titleSort.compare(b.name,a.name):titleSort.compare(a.name,b.name);});
       for(Dav.Item item:visible){
         JSONObject rec=record(item.url);String sub=item.dir?"フォルダ":rec.length()==0?"未読":rec.optBoolean("finished")?"既読":"途中  "+(rec.optInt("page")+1)+" / "+rec.optInt("total");
+        if(showHidden&&HiddenFolders.hidden(hidden,item.url))sub+="  [非表示設定]";
         TextView v=entry(clean(item.name),author(item.name)+"  "+sub);
         LinearLayout row=new LinearLayout(this);row.setGravity(Gravity.CENTER_VERTICAL);
         if(item.dir){
@@ -212,15 +222,18 @@ public class MainActivity extends Activity {
               });
             });
           };
-          visibleCoverChecks.add(check);
-          coverFrame.setOnClickListener(w->{if(failed[0]){failed[0]=false;check.run();}else if(cover.getDrawable()!=null){folders.push(new String[]{url,name});browse(item.url,item.name);}});
+          boolean suppressCover=!showHidden&&HiddenFolders.hasDescendant(hidden,item.url);
+          if(suppressCover)coverStatus.setText("表紙非表示");else visibleCoverChecks.add(check);
+          coverFrame.setOnClickListener(w->{if(suppressCover){folders.push(new String[]{url,name});browse(item.url,item.name);}else if(failed[0]){failed[0]=false;check.run();}else if(cover.getDrawable()!=null){folders.push(new String[]{url,name});browse(item.url,item.name);}});
         }
         row.addView(v,new LinearLayout.LayoutParams(0,-2,1));list.addView(row);
         row.setOnClickListener(w->{if(item.dir){folders.push(new String[]{url,name});browse(item.url,item.name);}else openBook(item.url,item.name,url,name);});
         if(item.dir)row.setOnLongClickListener(w->{
-          new AlertDialog.Builder(this).setTitle(clean(item.name)+"の表紙").setItems(new String[]{"漫画のページを表紙に選ぶ","手動の表紙設定を解除"},(dialog,choice)->{
+          boolean ownHidden=HiddenFolders.explicitlyHidden(hiddenFolders(),item.url);
+          new AlertDialog.Builder(this).setTitle(clean(item.name)).setItems(new String[]{"漫画のページを表紙に選ぶ","手動の表紙設定を解除",ownHidden?"このフォルダの非表示設定を解除":"このフォルダを非表示にする"},(dialog,choice)->{
             if(choice==0){manualCoverTarget=item.url;manualCoverName=item.name;folders.push(new String[]{url,name});browse(item.url,item.name);}
-            else{async(()->{FolderCovers.clearManual(getApplicationContext(),item.url);return true;},ignored->{message("自動の表紙に戻しました");browse(url,name);});}
+            else if(choice==1){async(()->{FolderCovers.clearManual(getApplicationContext(),item.url);return true;},ignored->{message("自動の表紙に戻しました");browse(url,name);});}
+            else{setHiddenFolder(item.url,!ownHidden);message(ownHidden?"非表示設定を解除しました":"非表示にしました");browse(url,name);}
           }).setNegativeButton("キャンセル",null).show();return true;
         });
       }

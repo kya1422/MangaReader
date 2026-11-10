@@ -22,7 +22,7 @@ final class NestedBook {
     for(Dav.Item child:folders){Dav.Item found=search(child.url,source,cancel,visited,depth+1,count);if(found!=null)return found;}
     return null;
   }
-  private static String safe(String s){
+  static String safe(String s){
     StringBuilder out=new StringBuilder();
     int scheme=s.indexOf("://"),pathStart=scheme<0?0:s.indexOf('/',scheme+3);
     if(pathStart<0)pathStart=s.length();
