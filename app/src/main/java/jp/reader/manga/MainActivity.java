@@ -17,7 +17,12 @@ import java.util.concurrent.*;
 
 public class MainActivity extends Activity {
   android.content.SharedPreferences prefs; ExecutorService worker=Executors.newFixedThreadPool(2); final ExecutorService browseWorker=Executors.newFixedThreadPool(2); Handler ui=new Handler(Looper.getMainLooper()); volatile int generation=0; LinearLayout root; Dav dav; RemoteZip zip; String bookUrl,bookName,folderUrl,folderName; int page=0,next=0; boolean reading=false; HashMap<Integer,Integer> previous=new HashMap<>(); TreeSet<Integer> cuts=new TreeSet<>(); Bitmap right,left; String alias=""; String downloadState=""; TextView downloadLabel; boolean controlsVisible=false; boolean leftToRightSpread=false; final ExecutorService thumbWorker=Executors.newSingleThreadExecutor(); final ArrayList<ImageView> thumbnailViews=new ArrayList<>(); final ArrayList<Bitmap> thumbnailBitmaps=new ArrayList<>(); volatile int previewSerial=0; Runnable previewPending; final ExecutorService prefetchWorker=Executors.newSingleThreadExecutor(); boolean prefetchRequested=false; String prefetchStatus=""; TextView prefetchLabel; JSONObject recordCache; String screen="home"; final ArrayDeque<String[]> folders=new ArrayDeque<>();
-  final ExecutorService coverWorker=Executors.newSingleThreadExecutor(); volatile int coverSerial=0;
+  final ExecutorService coverWorker=Executors.newSingleThreadExecutor(); final ExecutorService bookCloser=Executors.newSingleThreadExecutor(); volatile int coverSerial=0;
+  void closeBookAsync(RemoteZip book){
+    if(book==null)return;book.cancel();
+    try{bookCloser.execute(book::close);}catch(java.util.concurrent.RejectedExecutionException e){Thread t=new Thread(book::close,"close-book");t.setDaemon(true);t.start();}
+  }
+  void closeCurrentBook(){RemoteZip old=zip;zip=null;closeBookAsync(old);}
   interface Task<T>{T run() throws Exception;} interface Done<T>{void accept(T x) throws Exception;}
   public void onCreate(Bundle b){super.onCreate(b);prefs=getSharedPreferences("reader",MODE_PRIVATE);alias=prefs.getString("alias","");DownloadCache.cleanup(this);home();}
   void clear(){
@@ -74,7 +79,7 @@ public class MainActivity extends Activity {
   <T> void async(Task<T> task,Done<T> done,java.util.function.Consumer<Exception> fail){
     int id=generation;ExecutorService executor="reader".equals(screen)?worker:browseWorker;
     executor.execute(()->{if(id!=generation)return;try{T result=task.run();ui.post(()->{
-      if(id!=generation){if(result instanceof Spread){Spread discarded=(Spread)result;discarded.a.recycle();if(discarded.b!=null)discarded.b.recycle();}return;}
+      if(id!=generation){if(result instanceof Spread){Spread discarded=(Spread)result;discarded.a.recycle();if(discarded.b!=null)discarded.b.recycle();}else if(result instanceof RemoteZip)closeBookAsync((RemoteZip)result);return;}
       try{done.accept(result);}catch(Exception e){fail.accept(e);}
     });}catch(Exception e){ui.post(()->{if(id==generation)fail.accept(e);});}});
   }
@@ -83,7 +88,7 @@ public class MainActivity extends Activity {
   JSONObject record(String key){JSONObject j=records().optJSONObject(key);return j==null?new JSONObject():j;}
   String clean(String s){return TitleSort.displayTitle(s);}
   String author(String s){java.util.regex.Matcher m=java.util.regex.Pattern.compile("\\[([^]]+)\\]").matcher(s);return m.find()?m.group(1):"";}
-  void home(){screen="home";folders.clear();DownloadCache.pin(null);DownloadCache.cleanup(this);reading=false;zip=null;clear();release();root.addView(text("漫画リーダー",25));LinearLayout bar=new LinearLayout(this);bar.addView(button("フォルダ",()->browse(prefs.getString("url",""),"フォルダ")));bar.addView(button("接続設定",this::settings));root.addView(bar);LinearLayout list=scroll();JSONObject all=records();ArrayList<JSONObject> recent=new ArrayList<>();Iterator<String> keys=all.keys();while(keys.hasNext()){JSONObject o=all.optJSONObject(keys.next());if(o!=null&&!o.optBoolean("finished"))recent.add(o);}recent.sort((a,b)->Long.compare(b.optLong("time"),a.optLong("time")));
+  void home(){screen="home";folders.clear();DownloadCache.pin(null);DownloadCache.cleanup(this);reading=false;closeCurrentBook();clear();release();root.addView(text("漫画リーダー",25));LinearLayout bar=new LinearLayout(this);bar.addView(button("フォルダ",()->browse(prefs.getString("url",""),"フォルダ")));bar.addView(button("接続設定",this::settings));root.addView(bar);LinearLayout list=scroll();JSONObject all=records();ArrayList<JSONObject> recent=new ArrayList<>();Iterator<String> keys=all.keys();while(keys.hasNext()){JSONObject o=all.optJSONObject(keys.next());if(o!=null&&!o.optBoolean("finished"))recent.add(o);}recent.sort((a,b)->Long.compare(b.optLong("time"),a.optLong("time")));
     list.addView(text("最近読んだ本",21));if(recent.isEmpty())list.addView(text("読みかけの本はありません",14));for(JSONObject o:recent){String name=o.optString("name"),url=o.optString("url"),fu=o.optString("folder"),fn=o.optString("folderName");TextView v=entry(clean(name),author(name)+"  途中 "+(o.optInt("page")+1)+" / "+o.optInt("total"));list.addView(v);v.setOnClickListener(w->openBook(url,name,fu,fn));}
     list.addView(text("読みかけのシリーズ",21));HashSet<String> seen=new HashSet<>();ArrayList<JSONObject> series=new ArrayList<>();for(JSONObject o:recent)if(seen.add(o.optString("folder")))series.add(o);
     String sort=prefs.getString("sort","最近読んだ順");if(sort.equals("タイトル順")){TitleSort ts=new TitleSort();series.sort((a,b)->ts.compare(a.optString("folderName"),b.optString("folderName")));}else if(sort.equals("著者順"))series.sort((a,b)->RemoteZip.natural(author(a.optString("folderName")),author(b.optString("folderName"))));
@@ -126,7 +131,7 @@ public class MainActivity extends Activity {
   Dav client() throws Exception{return new Dav(this,prefs.getString("url",""),prefs.getString("user",""),PasswordStore.read(prefs),prefs.getString("alias",""));}
   void browse(String url,String name){
     if(url.isEmpty()){settings();return;}
-    screen="browse";DownloadCache.pin(null);DownloadCache.cleanup(this);reading=false;clear();release();
+    screen="browse";DownloadCache.pin(null);DownloadCache.cleanup(this);reading=false;closeCurrentBook();clear();release();
     root.addView(button("← ホーム",this::home));root.addView(text(clean(name),23));
     LinearLayout searchBar=new LinearLayout(this);
     EditText query=new EditText(this);query.setSingleLine();query.setHint("フォルダ名を検索");
@@ -208,8 +213,25 @@ public class MainActivity extends Activity {
     refresh.run();
     async(()->{Dav d=client();return d.list(url);},items->{loaded.addAll(items);ready[0]=true;refresh.run();});
   }
-  void openBook(String url,String name,String folder,String fname){screen="reader";DownloadCache.pin(null);DownloadCache.touch(this,url);DownloadCache.pin(url);bookUrl=url;bookName=name;folderUrl=folder;folderName=fname;reading=true;controlsVisible=false;prefetchRequested=false;prefetchStatus="";previous.clear();cuts.clear();JSONObject rec=record(url);leftToRightSpread=rec.optBoolean("leftToRightSpread",false);page=rec.optInt("page",0);JSONArray arr=rec.optJSONArray("cuts");if(arr!=null)for(int i=0;i<arr.length();i++)cuts.add(arr.optInt(i));clear();loadingBars();root.addView(button("← ホーム",this::home));root.addView(text("本を開いています…",20));downloadState="保存準備中";async(()->{Dav d=client();RemoteZip opened=RemoteBooks.open(d,url,name);DownloadCache.start(this,d,url,state->ui.post(()->{if(reading && url.equals(bookUrl)){downloadState=state;if(downloadLabel!=null)downloadLabel.setText("端末への保存: "+state);}}));return opened;},z->{zip=z;if(rec.optInt("orientationCount",-1)==z.pages.size())z.orientations.putAll(OrientationCodec.decode(z.pages.size(),rec.optString("orientations","")));page=Math.max(0,Math.min(page,zip.pages.size()-1));render();});}
-  void save(){if(zip==null)return;JSONObject o=record(bookUrl);try{o.put("url",bookUrl);o.put("name",bookName);o.put("folder",folderUrl);o.put("folderName",folderName);o.put("page",page);o.put("total",zip.pages.size());o.put("time",System.currentTimeMillis());if(!o.has("finished"))o.put("finished",false);o.put("leftToRightSpread",leftToRightSpread);o.put("orientationCount",zip.pages.size());o.put("orientations",OrientationCodec.encode(zip.pages.size(),zip.orientations));JSONArray a=new JSONArray();for(int cut:cuts)a.put(cut);o.put("cuts",a);put(bookUrl,o);}catch(Exception ignored){}}
+  void openBook(String url,String name,String folder,String fname){
+    closeCurrentBook();screen="reader";DownloadCache.pin(null);DownloadCache.touch(this,url);DownloadCache.pin(url);
+    bookUrl=url;bookName=name;folderUrl=folder;folderName=fname;reading=true;controlsVisible=false;prefetchRequested=false;prefetchStatus="";previous.clear();cuts.clear();
+    JSONObject rec=record(url);leftToRightSpread=rec.optBoolean("leftToRightSpread",false);page=rec.optInt("page",0);
+    JSONArray arr=rec.optJSONArray("cuts");if(arr!=null)for(int i=0;i<arr.length();i++)cuts.add(arr.optInt(i));
+    clear();loadingBars();root.addView(button("← ホーム",this::home));TextView loading=text("本を開いています…",20);root.addView(loading);downloadState="保存準備中";
+    async(()->{
+      Dav d=client();DownloadCache.start(this,d,url,state->ui.post(()->{if(reading && url.equals(bookUrl)){downloadState=state;if(downloadLabel!=null)downloadLabel.setText("端末への保存: "+state);}}));
+      return RemoteBooks.open(d,url,name);
+    },z->{
+      zip=z;if(rec.optInt("orientationCount",-1)==z.pages.size()&&rec.optLong("orientationLength",-1)==z.archiveLength)z.orientations.putAll(OrientationCodec.decode(z.pages.size(),rec.optString("orientations","")));
+      page=Math.max(0,Math.min(page,zip.pages.size()-1));render();
+    },error->{
+      DownloadCache.pin(null);loading.setText("本を開けませんでした: "+(error.getMessage()==null?"不明なエラー":error.getMessage()));
+      root.addView(button("再試行",()->openBook(url,name,folder,fname)));
+      root.addView(button("フォルダに戻る",()->{if(folder==null||folder.isEmpty())home();else browse(folder,fname);}));
+    });
+  }
+  void save(){if(zip==null)return;JSONObject o=record(bookUrl);try{o.put("url",bookUrl);o.put("name",bookName);o.put("folder",folderUrl);o.put("folderName",folderName);o.put("page",page);o.put("total",zip.pages.size());o.put("time",System.currentTimeMillis());if(!o.has("finished"))o.put("finished",false);o.put("leftToRightSpread",leftToRightSpread);o.put("orientationCount",zip.pages.size());o.put("orientationLength",zip.archiveLength);o.put("orientations",OrientationCodec.encode(zip.pages.size(),zip.orientations));JSONArray a=new JSONArray();for(int cut:cuts)a.put(cut);o.put("cuts",a);put(bookUrl,o);}catch(Exception ignored){}}
   void release(){if(right!=null){right.recycle();right=null;}if(left!=null){left.recycle();left=null;}}
   static final class Spread {Bitmap a,b;int next;Spread(Bitmap x,Bitmap y,int n){a=x;b=y;next=n;}}
   void scheduleGallery(RemoteZip current,int index,LinearLayout strip,HorizontalScrollView scroller,TextView caption){
@@ -296,7 +318,12 @@ public class MainActivity extends Activity {
     });
     if(controlsVisible)scheduleGallery(current,page,strip,scroller,caption);
     int width=getResources().getDisplayMetrics().widthPixels,height=getResources().getDisplayMetrics().heightPixels;
-    async(()->{Bitmap a=current.bitmap(requested,width,height);Bitmap b=null;int n=requested+1;if(!current.isWide(requested)&&n<current.pages.size()&&!anchors.contains(n)){try{if(!current.isWide(n)){b=current.bitmap(n,width,height);n++;}}catch(Exception e){a.recycle();throw e;}}return new Spread(a,b,n);},s->{
+    async(()->{
+      boolean wide=current.isWide(requested);int pageWidth=wide?width:Math.max(1,width/2);
+      Bitmap a=current.bitmap(requested,pageWidth,height);Bitmap b=null;int n=requested+1;
+      if(!wide&&n<current.pages.size()&&!anchors.contains(n)){try{if(!current.isWide(n)){b=current.bitmap(n,Math.max(1,width/2),height);n++;}}catch(Exception e){a.recycle();throw e;}}
+      return new Spread(a,b,n);
+    },s->{
       release();right=s.a;left=s.b;next=s.next;status.setText((page+1)+(next>page+1?"–"+next:"")+" / "+zip.pages.size());
       Bitmap pageOnLeft=left==null?null:(leftToRightSpread?right:left);
       Bitmap pageOnRight=left==null?right:(leftToRightSpread?left:right);
@@ -382,5 +409,5 @@ public class MainActivity extends Activity {
   }
   void backPage(){if(zip==null||page<=0)return;Integer p=previous.get(page);if(p==null){jumpToPage(page-1);return;}page=p;next=0;controlsVisible=false;render();}
   @Override public void onBackPressed(){if("home".equals(screen)){super.onBackPressed();return;}if("reader".equals(screen) && folderUrl!=null && !folderUrl.isEmpty()){browse(folderUrl,folderName);return;}if("browse".equals(screen)&&!folders.isEmpty()){String[] parent=folders.pop();browse(parent[0],parent[1]);return;}home();}
-  @Override protected void onDestroy(){generation++;coverSerial++;worker.shutdownNow();browseWorker.shutdownNow();coverWorker.shutdownNow();thumbWorker.shutdownNow();prefetchWorker.shutdownNow();clearThumbnail();release();super.onDestroy();}
+  @Override protected void onDestroy(){generation++;coverSerial++;closeCurrentBook();worker.shutdownNow();browseWorker.shutdownNow();coverWorker.shutdownNow();thumbWorker.shutdownNow();prefetchWorker.shutdownNow();bookCloser.shutdown();clearThumbnail();release();super.onDestroy();}
 }
