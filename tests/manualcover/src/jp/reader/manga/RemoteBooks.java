@@ -1,0 +1,1 @@
+package jp.reader.manga;import java.util.function.BooleanSupplier;class RemoteBooks{static String lastBook;static RemoteZip open(Dav d,String url,String name,BooleanSupplier cancel){lastBook=url;return new RemoteZip();}}

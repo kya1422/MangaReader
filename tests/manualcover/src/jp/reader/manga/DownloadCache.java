@@ -1,0 +1,1 @@
+package jp.reader.manga;class DownloadCache{static String id(String s)throws Exception{byte[] v=java.security.MessageDigest.getInstance("SHA-256").digest(s.getBytes("UTF-8"));StringBuilder b=new StringBuilder();for(byte x:v)b.append(String.format("%02x",x&255));return b.toString();}}

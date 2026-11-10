@@ -32,3 +32,6 @@ java -Dfile.encoding=UTF-8 -cp "$tmp/titlesort" jp.reader.manga.TestTitleSort
 mkdir -p "$tmp/orientation"
 javac -encoding UTF-8 -d "$tmp/orientation" tests/orientation/src/jp/reader/manga/TestOrientation.java app/src/main/java/jp/reader/manga/OrientationCodec.java
 java -Dfile.encoding=UTF-8 -cp "$tmp/orientation" jp.reader.manga.TestOrientation
+mkdir -p "$tmp/manualcover"
+javac -encoding UTF-8 -d "$tmp/manualcover" $(find tests/manualcover/src -name '*.java') app/src/main/java/jp/reader/manga/FolderCovers.java app/src/main/java/jp/reader/manga/CoverCrop.java
+java -Dfile.encoding=UTF-8 -cp "$tmp/manualcover" jp.reader.manga.TestManualCover

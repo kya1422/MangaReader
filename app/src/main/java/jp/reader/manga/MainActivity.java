@@ -17,6 +17,7 @@ import java.util.concurrent.*;
 
 public class MainActivity extends Activity {
   android.content.SharedPreferences prefs; ExecutorService worker=Executors.newFixedThreadPool(2); final ExecutorService browseWorker=Executors.newFixedThreadPool(2); Handler ui=new Handler(Looper.getMainLooper()); volatile int generation=0; LinearLayout root; Dav dav; RemoteZip zip; String bookUrl,bookName,folderUrl,folderName; int page=0,next=0; boolean reading=false; HashMap<Integer,Integer> previous=new HashMap<>(); TreeSet<Integer> cuts=new TreeSet<>(); Bitmap right,left; String alias=""; String downloadState=""; TextView downloadLabel; boolean controlsVisible=false; boolean leftToRightSpread=false; final ExecutorService thumbWorker=Executors.newSingleThreadExecutor(); final ArrayList<ImageView> thumbnailViews=new ArrayList<>(); final ArrayList<Bitmap> thumbnailBitmaps=new ArrayList<>(); volatile int previewSerial=0; Runnable previewPending; final ExecutorService prefetchWorker=Executors.newSingleThreadExecutor(); boolean prefetchRequested=false; String prefetchStatus=""; TextView prefetchLabel; JSONObject recordCache; String screen="home"; final ArrayDeque<String[]> folders=new ArrayDeque<>();
+  String manualCoverTarget,manualCoverName; boolean manualCoverSaving;
   final ExecutorService coverWorker=Executors.newSingleThreadExecutor(); final ExecutorService bookCloser=Executors.newSingleThreadExecutor(); volatile int coverSerial=0;
   void closeBookAsync(RemoteZip book){
     if(book==null)return;book.cancel();
@@ -88,7 +89,7 @@ public class MainActivity extends Activity {
   JSONObject record(String key){JSONObject j=records().optJSONObject(key);return j==null?new JSONObject():j;}
   String clean(String s){return TitleSort.displayTitle(s);}
   String author(String s){java.util.regex.Matcher m=java.util.regex.Pattern.compile("\\[([^]]+)\\]").matcher(s);return m.find()?m.group(1):"";}
-  void home(){screen="home";folders.clear();DownloadCache.pin(null);DownloadCache.cleanup(this);reading=false;closeCurrentBook();clear();release();root.addView(text("漫画リーダー",25));LinearLayout bar=new LinearLayout(this);bar.addView(button("フォルダ",()->browse(prefs.getString("url",""),"フォルダ")));bar.addView(button("接続設定",this::settings));root.addView(bar);LinearLayout list=scroll();JSONObject all=records();ArrayList<JSONObject> recent=new ArrayList<>();Iterator<String> keys=all.keys();while(keys.hasNext()){JSONObject o=all.optJSONObject(keys.next());if(o!=null&&!o.optBoolean("finished"))recent.add(o);}recent.sort((a,b)->Long.compare(b.optLong("time"),a.optLong("time")));
+  void home(){manualCoverTarget=null;manualCoverName=null;screen="home";folders.clear();DownloadCache.pin(null);DownloadCache.cleanup(this);reading=false;closeCurrentBook();clear();release();root.addView(text("漫画リーダー",25));LinearLayout bar=new LinearLayout(this);bar.addView(button("フォルダ",()->browse(prefs.getString("url",""),"フォルダ")));bar.addView(button("接続設定",this::settings));root.addView(bar);LinearLayout list=scroll();JSONObject all=records();ArrayList<JSONObject> recent=new ArrayList<>();Iterator<String> keys=all.keys();while(keys.hasNext()){JSONObject o=all.optJSONObject(keys.next());if(o!=null&&!o.optBoolean("finished"))recent.add(o);}recent.sort((a,b)->Long.compare(b.optLong("time"),a.optLong("time")));
     list.addView(text("最近読んだ本",21));if(recent.isEmpty())list.addView(text("読みかけの本はありません",14));for(JSONObject o:recent){String name=o.optString("name"),url=o.optString("url"),fu=o.optString("folder"),fn=o.optString("folderName");TextView v=entry(clean(name),author(name)+"  途中 "+(o.optInt("page")+1)+" / "+o.optInt("total"));list.addView(v);v.setOnClickListener(w->openBook(url,name,fu,fn));}
     list.addView(text("読みかけのシリーズ",21));HashSet<String> seen=new HashSet<>();ArrayList<JSONObject> series=new ArrayList<>();for(JSONObject o:recent)if(seen.add(o.optString("folder")))series.add(o);
     String sort=prefs.getString("sort","最近読んだ順");if(sort.equals("タイトル順")){TitleSort ts=new TitleSort();series.sort((a,b)->ts.compare(a.optString("folderName"),b.optString("folderName")));}else if(sort.equals("著者順"))series.sort((a,b)->RemoteZip.natural(author(a.optString("folderName")),author(b.optString("folderName"))));
@@ -133,6 +134,10 @@ public class MainActivity extends Activity {
     if(url.isEmpty()){settings();return;}
     screen="browse";DownloadCache.pin(null);DownloadCache.cleanup(this);reading=false;closeCurrentBook();clear();release();
     root.addView(button("← ホーム",this::home));root.addView(text(clean(name),23));
+    if(manualCoverTarget!=null){
+      LinearLayout selection=new LinearLayout(this);selection.addView(text("表紙選択中: "+clean(manualCoverName)+"。漫画を開いてページを選んでください",13),new LinearLayout.LayoutParams(0,-2,1));
+      selection.addView(button("選択をやめる",()->{manualCoverTarget=null;manualCoverName=null;browse(url,name);}));root.addView(selection);
+    }
     LinearLayout searchBar=new LinearLayout(this);
     EditText query=new EditText(this);query.setSingleLine();query.setHint("フォルダ名を検索");
     searchBar.addView(query,new LinearLayout.LayoutParams(0,-2,1));
@@ -140,7 +145,7 @@ public class MainActivity extends Activity {
     LinearLayout coverBar=new LinearLayout(this);
     Button coverToggle=button("",()->{});coverBar.addView(coverToggle);
     coverBar.addView(button("表紙を再取得",()->new AlertDialog.Builder(this).setTitle("表紙を再取得")
-      .setMessage("保存した表紙画像を削除し、表示中のフォルダから順次取得し直します。漫画ファイルや履歴は削除しません。")
+      .setMessage("保存した表紙画像を削除し、表示中のフォルダから順次取得し直します。手動で選んだページの設定、漫画ファイルや履歴は削除しません。")
       .setNegativeButton("キャンセル",null).setPositiveButton("再取得",(d,w)->{coverSerial++;final int screenGeneration=generation;coverWorker.execute(()->{FolderCovers.clear(getApplicationContext());ui.post(()->{if(screenGeneration==generation && "browse".equals(screen))browse(url,name);});});}).show()));
     root.addView(coverBar);
     LinearLayout list=scroll();ScrollView coverScroll=(ScrollView)list.getParent();
@@ -179,27 +184,44 @@ public class MainActivity extends Activity {
           coverFrame.addView(coverStatus,new FrameLayout.LayoutParams(-1,-1));
           row.addView(coverFrame,new LinearLayout.LayoutParams(72*density/100,96*density/100));
           boolean[] pending={false},failed={false};
-          visibleCoverChecks.add(()->{
+          java.util.concurrent.atomic.AtomicBoolean[] active={null};
+          Runnable check=()->{
             if(serial!=coverSerial)return;
             android.graphics.Rect rect=new android.graphics.Rect();
             boolean rowVisible=prefs.getBoolean("covers_enabled",false)&&row.isShown()&&row.getGlobalVisibleRect(rect);
-            if(!rowVisible){cover.setImageDrawable(null);return;}
+            if(!rowVisible){if(active[0]!=null)active[0].set(true);cover.setImageDrawable(null);return;}
             if(pending[0]||failed[0]||cover.getDrawable()!=null)return;
-            pending[0]=true;coverStatus.setText("取得中…");
+            pending[0]=true;coverStatus.setText("待機中…");
+            java.util.concurrent.atomic.AtomicBoolean cancelled=new java.util.concurrent.atomic.AtomicBoolean();active[0]=cancelled;
             coverWorker.execute(()->{Bitmap image=null;String error=null;
-              try{if(serial==coverSerial)image=FolderCovers.load(getApplicationContext(),item.url,()->client(),()->serial!=coverSerial || Thread.currentThread().isInterrupted());}
-              catch(Exception e){error=e instanceof NestedBook.Limit?"探索上限":e.getMessage();if(error==null||error.isEmpty())error="通信エラー";}
+              try{
+                if(!cancelled.get()&&serial==coverSerial){
+                  ui.post(()->{if(serial==coverSerial&&!cancelled.get())coverStatus.setText("取得中…");});
+                  image=FolderCovers.load(getApplicationContext(),item.url,()->client(),()->cancelled.get()||serial!=coverSerial||Thread.currentThread().isInterrupted());
+                }
+              }catch(Exception e){error=e instanceof NestedBook.Limit?"探索上限":e.getMessage();if(error==null||error.isEmpty())error="通信エラー";}
               final Bitmap result=image;final String failure=error;
               ui.post(()->{
-                pending[0]=false;if(serial!=coverSerial)return;
-                if(result==null){failed[0]=true;coverStatus.setText(failure==null?"画像なし":failure);return;}
-                coverStatus.setText("");android.graphics.Rect r=new android.graphics.Rect();if(row.isShown()&&row.getGlobalVisibleRect(r))cover.setImageBitmap(result);
+                pending[0]=false;active[0]=null;
+                if(serial!=coverSerial){if(result!=null)result.recycle();return;}
+                android.graphics.Rect r=new android.graphics.Rect();boolean visibleNow=row.isShown()&&row.getGlobalVisibleRect(r)&&prefs.getBoolean("covers_enabled",false);
+                if(cancelled.get()||!visibleNow){if(result!=null)result.recycle();coverStatus.setText("");if(visibleNow)list.post(checkCovers);return;}
+                if(result==null){failed[0]=true;coverStatus.setText((failure==null?"画像なし":failure)+"\nタップで再試行");return;}
+                coverStatus.setText("");cover.setImageBitmap(result);
               });
             });
-          });
+          };
+          visibleCoverChecks.add(check);
+          coverFrame.setOnClickListener(w->{if(failed[0]){failed[0]=false;check.run();}else if(cover.getDrawable()!=null){folders.push(new String[]{url,name});browse(item.url,item.name);}});
         }
         row.addView(v,new LinearLayout.LayoutParams(0,-2,1));list.addView(row);
         row.setOnClickListener(w->{if(item.dir){folders.push(new String[]{url,name});browse(item.url,item.name);}else openBook(item.url,item.name,url,name);});
+        if(item.dir)row.setOnLongClickListener(w->{
+          new AlertDialog.Builder(this).setTitle(clean(item.name)+"の表紙").setItems(new String[]{"漫画のページを表紙に選ぶ","手動の表紙設定を解除"},(dialog,choice)->{
+            if(choice==0){manualCoverTarget=item.url;manualCoverName=item.name;folders.push(new String[]{url,name});browse(item.url,item.name);}
+            else{async(()->{FolderCovers.clearManual(getApplicationContext(),item.url);return true;},ignored->{message("自動の表紙に戻しました");browse(url,name);});}
+          }).setNegativeButton("キャンセル",null).show();return true;
+        });
       }
       if(visible.isEmpty())list.addView(text(loaded.isEmpty()?"フォルダまたは対応ファイルがありません":"一致する項目がありません",16));
       list.post(checkCovers);
@@ -294,6 +316,8 @@ public class MainActivity extends Activity {
         leftToRightSpread=choice==1;save();dialog.dismiss();render();
       }).setNegativeButton("キャンセル",null).show()));
     controls.addView(bar);
+    Button chooseCover=manualCoverTarget==null?null:button("このページを「"+clean(manualCoverName)+"」の表紙にする",()->chooseManualCover());
+    if(chooseCover!=null){chooseCover.setEnabled(false);controls.addView(chooseCover);}
     controls.addView(button("文字・線の濃さ",()->new AlertDialog.Builder(this).setTitle("文字・線の濃さ（全ての本に適用）")
       .setSingleChoiceItems(new String[]{"標準（処理なし）","弱","強"},prefs.getInt("ink_strength",0),(dialog,choice)->{
         prefs.edit().putInt("ink_strength",choice).apply();
@@ -326,7 +350,7 @@ public class MainActivity extends Activity {
       if(pair){try{b=current.bitmap(n,pageWidth,height);n++;}catch(Exception e){a.recycle();throw e;}}
       return new Spread(a,b,n);
     },s->{
-      release();right=s.a;left=s.b;next=s.next;status.setText((page+1)+(next>page+1?"–"+next:"")+" / "+zip.pages.size());
+      release();right=s.a;left=s.b;next=s.next;if(chooseCover!=null)chooseCover.setEnabled(!manualCoverSaving);status.setText((page+1)+(next>page+1?"–"+next:"")+" / "+zip.pages.size());
       Bitmap pageOnLeft=left==null?null:(leftToRightSpread?right:left);
       Bitmap pageOnRight=left==null?right:(leftToRightSpread?left:right);
       SpreadView spreadView=new SpreadView(this,pageOnLeft,pageOnRight);
@@ -348,6 +372,28 @@ public class MainActivity extends Activity {
       else recovery.addView(button("読了画面へ",this::finishBook));
       controls.addView(recovery);root.requestApplyInsets();controls.requestApplyInsets();seekPanel.requestApplyInsets();
     });
+  }
+  void chooseManualCover(){
+    if(zip==null||manualCoverTarget==null||next<=page||manualCoverSaving)return;
+    int first=page;boolean pair=next>page+1;
+    String[] options=pair?new String[]{(first+1)+"ページ目（"+(leftToRightSpread?"左":"右")+"）",(first+2)+"ページ目（"+(leftToRightSpread?"右":"左")+"）"}:new String[]{(first+1)+"ページ目"};
+    String target=manualCoverTarget,targetName=manualCoverName,source=bookUrl,sourceName=bookName;RemoteZip current=zip;
+    new AlertDialog.Builder(this).setTitle("「"+clean(targetName)+"」の表紙にするページ")
+      .setItems(options,(dialog,choice)->{
+        int selected=first+choice;
+        if(manualCoverSaving)return;manualCoverSaving=true;
+        worker.execute(()->{
+          Exception failure=null;try{FolderCovers.setManual(getApplicationContext(),target,source,sourceName,selected,current);}catch(Exception e){failure=e;}
+          Exception error=failure;ui.post(()->{
+            manualCoverSaving=false;if(isFinishing()||isDestroyed())return;
+            if(error==null){
+              boolean sameTarget=target.equals(manualCoverTarget);if(sameTarget){manualCoverTarget=null;manualCoverName=null;}
+              message("「"+clean(targetName)+"」の表紙を設定しました");
+              if(sameTarget&&"reader".equals(screen)&&zip==current)render();
+            }else message("表紙を保存できません: "+(error.getMessage()==null?"不明なエラー":error.getMessage()));
+          });
+        });
+      }).setNegativeButton("キャンセル",null).show();
   }
   void adjustFromPrevious(){
     if(zip==null)return;

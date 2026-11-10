@@ -1,0 +1,1 @@
+package jp.reader.manga;import java.util.*;class NestedBook{interface Cancel{boolean cancelled();}interface Source{List<Dav.Item> list(String url)throws Exception;}static Dav.Item find(String url,Source s,Cancel c){return new Dav.Item("https://example.com/auto.zip","auto.zip");}}
