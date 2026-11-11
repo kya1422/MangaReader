@@ -45,6 +45,11 @@ jobs:
           MANGA_KEYSTORE_PASSWORD: ${{ secrets.MANGA_KEYSTORE_PASSWORD }}
           MANGA_KEY_ALIAS: ${{ secrets.MANGA_KEY_ALIAS }}
         run: gradle --no-daemon :app:assembleRelease
+      - name: Verify fixed signing certificate
+        run: |
+          output=$("$ANDROID_HOME/build-tools/35.0.0/apksigner" verify --verbose --print-certs app/build/outputs/apk/release/app-release.apk)
+          printf '%s\n' "$output"
+          printf '%s\n' "$output" | grep -Fi 'Signer #1 certificate SHA-256 digest: 547e8dd43a5aa79e9e96614cb0a4aa835f8a04979b9893a6a8c45f788997a536'
       - name: Check APK does not request package installation permission
         run: |
           permissions=$("$ANDROID_HOME/build-tools/35.0.0/aapt" dump permissions app/build/outputs/apk/release/app-release.apk)
