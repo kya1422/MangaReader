@@ -12,5 +12,5 @@ final class NextBook {
     for(int i=0;i<files.size();i++)if(files.get(i).url.equals(currentUrl))return i+1<files.size()?files.get(i+1):null;
     return null;
   }
-  static boolean reachedThreshold(int visibleEnd,int total){return total>0 && visibleEnd>0 && (long)visibleEnd*10L >= (long)total*9L;}
+  static boolean reachedThreshold(int visibleEnd,int total){return total>0 && visibleEnd>0 && (long)visibleEnd*10L >= (long)total*8L;}
 }
