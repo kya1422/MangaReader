@@ -19,16 +19,18 @@ class TestArrivals {
   NewArrivals.Result limited=new NewArrivals.Result(Collections.emptyList(),1,0,0,true,true);
   NewArrivals.Result badRoot=new NewArrivals.Result(Collections.emptyList(),1,1,0,false,true);
   NewArrivals.Result manyErrors=new NewArrivals.Result(Collections.emptyList(),10,6,0,false,true);
-  check(!ArrivalCachePolicy.cacheable(progress)&&!ArrivalCachePolicy.cacheable(limited)&&ArrivalCachePolicy.cacheable(good),"cache only completed and non-truncated scans");
+  check(!ArrivalCachePolicy.cacheable(progress)&&ArrivalCachePolicy.cacheable(limited)&&ArrivalCachePolicy.cacheable(good),"cache completed scans but never interrupted scans");
   check(ArrivalCachePolicy.cacheable(r)&&!ArrivalCachePolicy.cacheable(badRoot)&&!ArrivalCachePolicy.cacheable(manyErrors),"few errors cache only if at least one folder succeeded");
   check(ArrivalCachePolicy.fresh(good,1000,1000+ArrivalCachePolicy.TTL-1)&&!ArrivalCachePolicy.fresh(good,1000,1000+ArrivalCachePolicy.TTL)&&!ArrivalCachePolicy.fresh(good,1000,999)&&!ArrivalCachePolicy.fresh(good,-1,100),"30 minute successful result TTL and boundary");
   check(ArrivalCachePolicy.fresh(r,1000,1000+ArrivalCachePolicy.ERROR_TTL-1)&&!ArrivalCachePolicy.fresh(r,1000,1000+ArrivalCachePolicy.ERROR_TTL)&&!ArrivalCachePolicy.fresh(progress,1000,1001),"five minute error TTL and no caching progress");
+  check(ArrivalCachePolicy.fresh(limited,1000,1000+ArrivalCachePolicy.ERROR_TTL-1)&&!ArrivalCachePolicy.fresh(limited,1000,1000+ArrivalCachePolicy.ERROR_TTL),"limited completed scan expires in five minutes");
   check(!seenFolders.contains(hidden),"hidden folders are not scanned");
   check(r.unknown==1,"missing date reported");
   check(r.books.size()==3&&r.books.get(0).url.equals(sub+"new.rar")&&r.books.get(1).url.equals(sub+"second.cbz")&&r.books.get(2).url.endsWith("boundary.zip"),"unread, cutoff, direct children and descending date");
   check(r.books.get(0).folder.equals(sub)&&r.books.get(0).folderName.equals("series"),"result retains parent for opening");
   List<Dav.Item> many=new ArrayList<>();for(int i=0;i<NewArrivals.MAX_RESULTS+1;i++)many.add(file(root+"book"+i+".zip",valid+i));
   NewArrivals.Result capped=NewArrivals.scan(root,url->many,Collections.emptySet(),Collections.emptySet(),now,cutoff,()->false,x->{});
+  check(ArrivalCachePolicy.cacheable(capped),"complete scan with result cap can be briefly reused");
   check(capped.limited&&capped.books.size()==NewArrivals.MAX_RESULTS&&capped.books.get(0).url.endsWith("book5000.zip")&&!capped.books.get(capped.books.size()-1).url.endsWith("book0.zip"),"result limit keeps newest and reports truncation");
   try{NewArrivals.scan(root,url->Collections.emptyList(),Collections.emptySet(),Collections.emptySet(),now,cutoff,()->true,x->{});throw new AssertionError("cancel ignored");}catch(java.io.IOException expected){System.out.println("PASS scan cancellation");}
  }

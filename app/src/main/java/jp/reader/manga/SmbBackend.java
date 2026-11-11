@@ -35,6 +35,11 @@ final class SmbBackend implements Closeable {
       }
     }
   }
+  static boolean folderFailure(Throwable t){
+    for(;t!=null;t=t.getCause())if(t instanceof com.hierynomus.mssmb2.SMBApiException)
+      return SmbFailurePolicy.folderStatus(((com.hierynomus.mssmb2.SMBApiException)t).getStatus().name());
+    return false;
+  }
   private static boolean reconnectable(Throwable t){
     for(;t!=null;t=t.getCause()){
       if(t instanceof com.hierynomus.protocol.transport.TransportException || t instanceof java.net.SocketException || t instanceof java.net.SocketTimeoutException)return true;
@@ -88,16 +93,16 @@ final class SmbBackend implements Closeable {
       file=openFile(open,url);long length=file.getFileInformation(FileStandardInformation.class).getEndOfFile();
       final com.hierynomus.smbj.share.File owned=file;
       InputStream in=new InputStream(){
-        boolean closed;long position;
+        final java.util.concurrent.atomic.AtomicBoolean closed=new java.util.concurrent.atomic.AtomicBoolean();long position;
         public int read()throws IOException{byte[] one=new byte[1];int n=read(one,0,1);return n<0?-1:one[0]&255;}
         public int read(byte[] b,int offset,int count)throws IOException{
-          if(closed)throw new IOException("SMBストリームは閉じています");
+          if(closed.get())throw new IOException("SMBストリームは閉じています");
           if(offset<0||count<0||offset>b.length-count)throw new IndexOutOfBoundsException();
           if(count==0)return 0;if(position>=length)return -1;
           try{int n=owned.read(b,position,offset,(int)Math.min(Math.min(count,65536),length-position));if(n<=0)throw new EOFException("SMBファイルが途中で切れました");position+=n;return n;}
           catch(IOException e){throw e;}catch(RuntimeException e){throw new IOException("SMB読み取りに失敗しました",e);}
         }
-        public void close(){if(closed)return;closed=true;try{owned.close();}catch(Exception ignored){}finally{open.close();}}
+        public void close(){if(!closed.compareAndSet(false,true))return;try{owned.close();}catch(Exception ignored){}finally{open.close();}}
       };
       return new Download(length,in);
     }catch(Exception e){if(file!=null)try{file.close();}catch(Exception ignored){}open.close();throw e;}

@@ -4,4 +4,9 @@ class Test{static void ok(boolean b,String s){if(!b)throw new AssertionError(s);
   Dav owner=new Dav(bytes);owner.entered=new CountDownLatch(1);owner.release=new CountDownLatch(1);CountDownLatch completed=new CountDownLatch(1);
   DownloadCache.start(ctx,owner,url,msg->completed.countDown());ok(owner.entered.await(5,TimeUnit.SECONDS),"download opened");
   owner.close();ok(owner.ownerCount()==1,"download retains connection after reader closes");
-  owner.release.countDown();ok(completed.await(5,TimeUnit.SECONDS),"retained download completed");ok(owner.ownerCount()==0,"download releases final connection owner");System.exit(0);}}
+  owner.release.countDown();ok(completed.await(5,TimeUnit.SECONDS),"retained download completed");ok(owner.ownerCount()==0,"download releases final connection owner");
+  String url2="https://example.com/slow.zip";Dav slow=new Dav(bytes);slow.entered=new CountDownLatch(1);slow.release=new CountDownLatch(1);slow.closeEntered=new CountDownLatch(1);slow.closeRelease=new CountDownLatch(1);slow.onZero=new CountDownLatch(1);
+  DownloadCache.start(ctx,slow,url2,msg->{});ok(slow.entered.await(5,TimeUnit.SECONDS),"slow download started");slow.close();
+  ExecutorService caller=Executors.newSingleThreadExecutor();Future<Boolean> deleted=caller.submit(()->DownloadCache.delete(ctx,url2));
+  try{ok(deleted.get(2,TimeUnit.SECONDS),"delete returns before slow connection close");ok(slow.closeEntered.await(2,TimeUnit.SECONDS),"connection close started asynchronously");}finally{slow.closeRelease.countDown();slow.release.countDown();caller.shutdownNow();}
+  ok(slow.onZero.await(5,TimeUnit.SECONDS),"cancelled download releases retained client");ok(DownloadCache.available(ctx,url2)==null,"cancelled download does not persist");System.exit(0);}}

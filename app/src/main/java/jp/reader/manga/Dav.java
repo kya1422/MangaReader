@@ -16,7 +16,7 @@ final class Dav implements Closeable {
   static final class Item { String url,name; boolean dir; long createdAt; Item(String u,String n,boolean d){this(u,n,d,0);} Item(String u,String n,boolean d,long c){url=u;name=n;dir=d;createdAt=c;} }
   final Context ctx; final String base,user,pass,alias; final SSLSocketFactory ssl; final X509TrustManager trust;
   private final SmbBackend smb;private final String smbSsid;private volatile boolean routeSelected,usingSmb;private volatile boolean transferStarted;private final SmbAliases knownUrls;
-  private final android.content.SharedPreferences urlIndex;private boolean discoverLegacyUrls;
+  private final android.content.SharedPreferences urlIndex;private boolean discoverLegacyUrls,continueScanOnFolderError;
   private static final Object DISCOVERY_LOCK=new Object();private static long discoveryRetryAfter;
   private volatile String lastReadSource, fallbackReason="";private volatile okhttp3.Call listingCall;private volatile boolean cancelled;
   Dav(Context c,String b,String u,String p,String a) throws Exception {
@@ -73,6 +73,7 @@ final class Dav implements Closeable {
   }
   private String lookupUrl(String url){return knownUrls==null?url:knownUrls.lookup(url);}
   void discoverExistingUrls(){discoverLegacyUrls=knownUrls!=null;}
+  void continueScanOnFolderError(){continueScanOnFolderError=true;}
   private void rememberWebDav(List<Item> items){
     android.content.SharedPreferences.Editor edit=urlIndex.edit();
     for(Item item:items){String key=knownUrls.key(item.url);if(key!=null){String chosen=knownUrls.lookup(item.url);edit.putString(key,chosen);}}
@@ -114,7 +115,10 @@ final class Dav implements Closeable {
   List<Item> list(String url) throws Exception {
     synchronized(this){if(useSmb()){
       try{List<SmbBackend.Entry> raw=smb.list(url);tryDiscoverExistingUrls(url,raw);List<Item> entries=new ArrayList<>();for(SmbBackend.Entry e:raw)entries.add(new Item(knownUrls.lookup(e.url),e.name,e.directory,e.createdAt));return entries;}
-      catch(Exception|LinkageError e){if(transferStarted||Thread.currentThread().isInterrupted())throw new IOException("Sambaに接続できません",e);usingSmb=false;fallbackReason="SMB一覧取得失敗"+status(e);}
+      catch(Exception|LinkageError e){
+        if(smb!=null&&SmbBackend.folderFailure(e)&&SmbFailurePolicy.keepSmbForFolder(continueScanOnFolderError,smb.relative(url).isEmpty(),true))throw new IOException("Sambaフォルダを取得できません"+status(e),e);
+        if(transferStarted||Thread.currentThread().isInterrupted())throw new IOException("Sambaに接続できません",e);usingSmb=false;fallbackReason="SMB一覧取得失敗"+status(e);
+      }
     }}
     List<Item> entries=listWebDav(url,false);if(discoverLegacyUrls)rememberWebDav(entries);for(Item e:entries)e.url=lookupUrl(e.url);return entries;
   }

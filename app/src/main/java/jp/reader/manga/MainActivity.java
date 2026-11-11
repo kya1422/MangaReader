@@ -156,6 +156,7 @@ public class MainActivity extends Activity {
       if(serial!=generation||Thread.currentThread().isInterrupted())return;
       try{
         try(Dav client=client()){
+        client.continueScanOnFolderError();
         synchronized(arrivalsLock){if(serial!=generation||Thread.currentThread().isInterrupted())return;arrivalsClient=client;}
         try{NewArrivals.scan(rootUrl,client::list,read,hidden,now,cutoff,()->serial!=generation||Thread.currentThread().isInterrupted(),result->ui.post(()->{
           if(serial!=generation||!"home".equals(screen))return;

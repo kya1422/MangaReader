@@ -3,6 +3,12 @@ import java.util.*;
 class TestSmbBackend{
  static void ok(boolean value,String label){if(!value)throw new AssertionError(label);System.out.println("PASS "+label);}
  public static void main(String[] a)throws Exception{
+  com.hierynomus.mssmb2.SMBApiException denied=new com.hierynomus.mssmb2.SMBApiException(com.hierynomus.mserref.NtStatus.STATUS_ACCESS_DENIED.getValue(),com.hierynomus.mssmb2.SMB2MessageCommandCode.SMB2_QUERY_DIRECTORY,new RuntimeException());
+  com.hierynomus.mssmb2.SMBApiException expired=new com.hierynomus.mssmb2.SMBApiException(com.hierynomus.mserref.NtStatus.STATUS_NETWORK_SESSION_EXPIRED.getValue(),com.hierynomus.mssmb2.SMB2MessageCommandCode.SMB2_QUERY_DIRECTORY,new RuntimeException());
+  ok(SmbBackend.folderFailure(denied)&&SmbBackend.folderFailure(new java.io.IOException(denied)),"folder access errors classified through cause");
+  ok(!SmbBackend.folderFailure(expired)&&!SmbBackend.folderFailure(new java.net.SocketTimeoutException()),"session and network errors remain eligible for fallback");
+  ok(SmbFailurePolicy.keepSmbForFolder(true,false,SmbBackend.folderFailure(denied)),"denied subfolder keeps SMB for later folders");
+  ok(!SmbFailurePolicy.keepSmbForFolder(true,true,SmbBackend.folderFailure(denied))&&!SmbFailurePolicy.keepSmbForFolder(true,false,SmbBackend.folderFailure(expired))&&!SmbFailurePolicy.keepSmbForFolder(false,false,SmbBackend.folderFailure(denied)),"root, network and non-scan fallback remain available");
   String root="https://dav.example/Comic/";
   SmbBackend smb=new SmbBackend(root,"127.0.0.1",1445,"books","smbtest","test-password".toCharArray(),"");
   smb.checkConnection();
