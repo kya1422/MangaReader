@@ -3,21 +3,33 @@ import java.net.URI;
 import java.util.*;
 /** Display filter only; not an access-control boundary. */
 final class HiddenFolders {
-  static boolean contains(String folder,String item){
-    if(folder==null||item==null||folder.isEmpty()||item.isEmpty())return false;
-    try{
-      URI a=new URI(NestedBook.safe(folder)).normalize(), b=new URI(NestedBook.safe(item)).normalize();
-      if(a.getHost()==null||b.getHost()==null||a.getScheme()==null||b.getScheme()==null)return false;
-      int ap=a.getPort()<0?("https".equalsIgnoreCase(a.getScheme())?443:80):a.getPort();
-      int bp=b.getPort()<0?("https".equalsIgnoreCase(b.getScheme())?443:80):b.getPort();
-      if(!a.getScheme().equalsIgnoreCase(b.getScheme())||!a.getHost().equalsIgnoreCase(b.getHost())||ap!=bp)return false;
-      String base=a.getPath(),path=b.getPath();if(base==null||path==null)return false;
-      while(base.length()>1&&base.endsWith("/"))base=base.substring(0,base.length()-1);
-      while(path.length()>1&&path.endsWith("/"))path=path.substring(0,path.length()-1);
-      return base.equals(path)||path.startsWith(base.equals("/")?"/":base+"/");
-    }catch(Exception e){return false;}
+  private static final class Path {
+    final String scheme,host,path;final int port;
+    Path(String s,String h,int p,String x){scheme=s;host=h;port=p;path=x;}
   }
-  static boolean hasDescendant(Set<String> folders,String parent){for(String folder:folders)if(contains(parent,folder))return true;return false;}
-  static boolean hidden(Set<String> folders,String item){for(String folder:folders)if(contains(folder,item))return true;return false;}
-  static boolean explicitlyHidden(Set<String> folders,String item){for(String folder:folders)if(contains(folder,item)&&contains(item,folder))return true;return false;}
+  private static Path parse(String value){
+    if(value==null||value.isEmpty())return null;
+    try{
+      URI u=new URI(NestedBook.safe(value)).normalize();
+      if(u.getHost()==null||u.getScheme()==null||u.getPath()==null)return null;
+      String path=u.getPath();while(path.length()>1&&path.endsWith("/"))path=path.substring(0,path.length()-1);
+      int port=u.getPort()<0?("https".equalsIgnoreCase(u.getScheme())?443:80):u.getPort();
+      return new Path(u.getScheme(),u.getHost(),port,path);
+    }catch(Exception e){return null;}
+  }
+  private static boolean contains(Path a,Path b){
+    if(a==null||b==null||a.port!=b.port||!a.scheme.equalsIgnoreCase(b.scheme)||!a.host.equalsIgnoreCase(b.host))return false;
+    return a.path.equals(b.path)||b.path.startsWith(a.path.equals("/")?"/":a.path+"/");
+  }
+  static boolean contains(String folder,String item){return contains(parse(folder),parse(item));}
+  static final class Index {
+    private final List<Path> paths=new ArrayList<>();
+    Index(Set<String> folders){for(String folder:folders){Path p=parse(folder);if(p!=null)paths.add(p);}}
+    boolean hidden(String item){if(paths.isEmpty())return false;Path p=parse(item);for(Path folder:paths)if(contains(folder,p))return true;return false;}
+    boolean hasDescendant(String parent){if(paths.isEmpty())return false;Path p=parse(parent);for(Path folder:paths)if(contains(p,folder))return true;return false;}
+    boolean explicitlyHidden(String item){if(paths.isEmpty())return false;Path p=parse(item);for(Path folder:paths)if(contains(folder,p)&&contains(p,folder))return true;return false;}
+  }
+  static boolean hasDescendant(Set<String> folders,String parent){return new Index(folders).hasDescendant(parent);}
+  static boolean hidden(Set<String> folders,String item){return new Index(folders).hidden(item);}
+  static boolean explicitlyHidden(Set<String> folders,String item){return new Index(folders).explicitlyHidden(item);}
 }

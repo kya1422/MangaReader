@@ -1,1 +1,1 @@
-package jp.reader.manga;import java.util.*;class Dav{static class Item{String url,name;Item(String u,String n){url=u;name=n;}}List<Item> list(String u){return Collections.emptyList();}}
+package jp.reader.manga;import java.util.*;class Dav implements java.io.Closeable{public void close(){}static class Item{String url,name;Item(String u,String n){url=u;name=n;}}List<Item> list(String u){return Collections.emptyList();}}

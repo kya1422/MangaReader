@@ -22,17 +22,18 @@ final class NewArrivals {
   static long parseCreation(String raw){try{return raw==null?0:OffsetDateTime.parse(raw.trim()).toInstant().toEpochMilli();}catch(Exception e){return 0;}}
   private static final Comparator<Book> ORDER=(a,b)->{int c=Long.compare(b.date,a.date);if(c==0)c=RemoteZip.natural(a.name,b.name);return c==0?a.url.compareTo(b.url):c;};
   static Result scan(String root,Source source,Set<String> read,Set<String> hidden,long now,long cutoff,Cancel cancel,Progress progress)throws Exception{
+    HiddenFolders.Index hiddenIndex=new HiddenFolders.Index(hidden);
     ArrayDeque<Folder> queue=new ArrayDeque<>();queue.add(new Folder(root,"フォルダ",0));Set<String> seen=new HashSet<>(),booksSeen=new HashSet<>();
     PriorityQueue<Book> newest=new PriorityQueue<>(ORDER.reversed());int scanned=0,errors=0,unknown=0;boolean limited=false;long lastProgress=System.nanoTime();
     while(!queue.isEmpty()){
       if(cancel.cancelled())throw new IOException("新着の取得を中止しました");
-      Folder f=queue.removeFirst();if(!seen.add(f.url)||HiddenFolders.hidden(hidden,f.url))continue;
+      Folder f=queue.removeFirst();if(!seen.add(f.url)||hiddenIndex.hidden(f.url))continue;
       if(scanned>=MAX_FOLDERS){limited=true;break;}scanned++;
       List<Dav.Item> children;
       try{children=source.list(f.url);}catch(Exception e){if(cancel.cancelled())throw e;errors++;if(scanned%16==0&&System.nanoTime()-lastProgress>=750_000_000L){progress.update(snapshot(newest,scanned,errors,unknown,limited,false));lastProgress=System.nanoTime();}continue;}
       for(Dav.Item item:children){
         if(cancel.cancelled())throw new IOException("新着の取得を中止しました");
-        if(!NestedBook.isDirectChild(f.url,item.url)||HiddenFolders.hidden(hidden,item.url))continue;
+        if(!NestedBook.isDirectChild(f.url,item.url)||hiddenIndex.hidden(item.url))continue;
         if(item.dir){if(f.depth>=MAX_DEPTH||queue.size()+seen.size()>=MAX_FOLDERS){limited=true;continue;}queue.addLast(new Folder(item.url,item.name,f.depth+1));continue;}
         if(!booksSeen.add(item.url)||read.contains(item.url))continue;
         if(item.createdAt<=0){unknown++;continue;}

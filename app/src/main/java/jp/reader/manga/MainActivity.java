@@ -32,18 +32,21 @@ public class MainActivity extends Activity {
     if(checkSelfPermission(android.Manifest.permission.ACCESS_FINE_LOCATION)==android.content.pm.PackageManager.PERMISSION_GRANTED)fillWifiName(field);
     else message("正確な位置情報が許可されていないためWi-Fi名を取得できません。WebDAVは引き続き利用できます。");
   }
-  final ExecutorService arrivalsWorker=Executors.newSingleThreadExecutor();
-  NewArrivals.Result arrivalsCache;String arrivalsCacheRoot;Set<String> arrivalsCacheHidden;long arrivalsCacheTime;
+  final ExecutorService arrivalsWorker=Executors.newFixedThreadPool(2);
+  NewArrivals.Result arrivalsCache;String arrivalsCacheRoot;Set<String> arrivalsCacheHidden;
+  volatile Future<?> arrivalsJob; private final Object arrivalsLock=new Object();private Dav arrivalsClient;
+  void cancelArrivals(){Future<?> job=arrivalsJob;arrivalsJob=null;if(job!=null)job.cancel(true);Dav client;synchronized(arrivalsLock){client=arrivalsClient;}if(client!=null)client.cancelPending();}
   final CoverDispatcher coverWorker=new CoverDispatcher(); final ExecutorService bookCloser=Executors.newSingleThreadExecutor(); volatile int coverSerial=0;
   void closeBookAsync(RemoteZip book){
     if(book==null)return;book.cancel();
-    try{bookCloser.execute(book::close);}catch(java.util.concurrent.RejectedExecutionException e){Thread t=new Thread(book::close,"close-book");t.setDaemon(true);t.start();}
+    Runnable release=()->{try{book.close();}finally{book.dav.close();}};
+    try{bookCloser.execute(release);}catch(java.util.concurrent.RejectedExecutionException e){Thread t=new Thread(release,"close-book");t.setDaemon(true);t.start();}
   }
   void closeCurrentBook(){RemoteZip old=zip;zip=null;closeBookAsync(old);}
   interface Task<T>{T run() throws Exception;} interface Done<T>{void accept(T x) throws Exception;}
   public void onCreate(Bundle b){super.onCreate(b);prefs=getSharedPreferences("reader",MODE_PRIVATE);alias=prefs.getString("alias","");DownloadCache.cleanup(this);home();}
   void clear(){
-    generation++;
+    generation++;cancelArrivals();
     coverSerial++;
     clearThumbnail();
     systemBars(reading && !controlsVisible);
@@ -114,7 +117,7 @@ public class MainActivity extends Activity {
   String author(String s){java.util.regex.Matcher m=java.util.regex.Pattern.compile("\\[([^]]+)\\]").matcher(s);return m.find()?m.group(1):"";}
   void home(){manualCoverTarget=null;manualCoverName=null;screen="home";folders.clear();DownloadCache.pin(null);DownloadCache.cleanup(this);reading=false;closeCurrentBook();clear();release();root.addView(text("漫画リーダー",25));LinearLayout bar=new LinearLayout(this);bar.addView(button("フォルダ",()->browse(prefs.getString("url",""),"フォルダ")));bar.addView(button("接続設定",this::settings));root.addView(bar);LinearLayout list=scroll();
     list.addView(text("新着・未読（1か月）",21));
-    LinearLayout arrivalHeader=new LinearLayout(this);TextView arrivalStatus=text("新着を確認中…",13);arrivalHeader.addView(arrivalStatus,new LinearLayout.LayoutParams(0,-2,1));arrivalHeader.addView(button("更新",()->{arrivalsCacheTime=0;home();}));list.addView(arrivalHeader);
+    LinearLayout arrivalHeader=new LinearLayout(this);TextView arrivalStatus=text("新着を確認中…",13);arrivalHeader.addView(arrivalStatus,new LinearLayout.LayoutParams(0,-2,1));arrivalHeader.addView(button("更新",()->{arrivalsCache=null;home();}));list.addView(arrivalHeader);
     LinearLayout arrivalList=new LinearLayout(this);arrivalList.setOrientation(LinearLayout.VERTICAL);list.addView(arrivalList);
     startNewArrivals(arrivalStatus,arrivalList);
     JSONObject all=records();ArrayList<JSONObject> recent=new ArrayList<>();Iterator<String> keys=all.keys();while(keys.hasNext()){JSONObject o=all.optJSONObject(keys.next());if(o!=null&&!o.optBoolean("finished")&&!hiddenRecord(o))recent.add(o);}recent.sort((a,b)->Long.compare(b.optLong("time"),a.optLong("time")));
@@ -125,16 +128,18 @@ public class MainActivity extends Activity {
     for(JSONObject o:series){String fn=o.optString("folderName"),fu=o.optString("folder"),bn=o.optString("name");TextView v=entry(clean(fn),author(fn)+"\n"+clean(bn)+"  途中 "+(o.optInt("page")+1)+" / "+o.optInt("total"));list.addView(v);v.setOnClickListener(w->browse(fu,fn));}
   }
   void displayNewArrivals(TextView status,LinearLayout list,NewArrivals.Result result,long now,long cutoff){
-    ArrayList<NewArrivals.Book> visible=new ArrayList<>();Set<String> hidden=hiddenFolders();JSONObject all=records();
-    for(NewArrivals.Book book:result.books)if(book.date>=cutoff&&book.date<=now&&!all.has(book.url)&&!HiddenFolders.hidden(hidden,book.url))visible.add(book);
-    String label=(result.complete?"取得完了":"確認中")+"："+visible.size()+"冊 / "+result.scanned+"フォルダ";
+    ArrayList<NewArrivals.Book> visible=new ArrayList<>();HiddenFolders.Index hidden=new HiddenFolders.Index(hiddenFolders());JSONObject all=records();
+    for(NewArrivals.Book book:result.books)if(book.date>=cutoff&&book.date<=now&&!all.has(book.url)&&!hidden.hidden(book.url))visible.add(book);
+    String label=(result.complete?"取得完了":"途中結果")+"："+visible.size()+"冊 / "+result.scanned+"フォルダ";
+    if(visible.size()>100)label+="（新しい順に100冊表示）";
     if(result.errors>0)label+="・取得失敗 "+result.errors+"フォルダ";
     if(result.unknown>0)label+="・作成日不明 "+result.unknown+"冊（対象外）";
     if(result.limited)label+="・探索または表示の上限に到達（一部のみ）";
     status.setText(label);list.removeAllViews();
     if(result.complete&&visible.isEmpty())list.addView(text(result.errors>0||result.limited?"一部を取得できていないため、結果は不完全です":"対象の未読本はありません",14));
     java.text.SimpleDateFormat format=new java.text.SimpleDateFormat("yyyy/MM/dd",java.util.Locale.JAPAN);
-    for(NewArrivals.Book book:visible){
+    int shown=0;for(NewArrivals.Book book:visible){
+      if(shown++>=100)break;
       TextView row=entry(clean(book.name),clean(book.folderName)+"  作成日 "+format.format(new java.util.Date(book.date)));list.addView(row);
       row.setOnClickListener(v->openBook(book.url,book.name,book.folder,book.folderName));
     }
@@ -143,20 +148,21 @@ public class MainActivity extends Activity {
     final String rootUrl=prefs.getString("url","");if(rootUrl.isEmpty()){status.setText("接続設定後に新着を確認できます");return;}
     final int serial=generation;Set<String> hidden=hiddenFolders();
     final long now=System.currentTimeMillis(),cutoff=java.time.Instant.ofEpochMilli(now).atZone(java.time.ZoneId.systemDefault()).minusMonths(1).toInstant().toEpochMilli();
-    if(arrivalsCache!=null&&rootUrl.equals(arrivalsCacheRoot)&&hidden.equals(arrivalsCacheHidden)&&now>=arrivalsCacheTime&&now-arrivalsCacheTime<5*60*1000L){
+    if(arrivalsCache!=null&&rootUrl.equals(arrivalsCacheRoot)&&hidden.equals(arrivalsCacheHidden)){
       displayNewArrivals(status,list,arrivalsCache,now,cutoff);status.append("（前回の結果・更新で再取得）");return;
     }
     Set<String> read=new HashSet<>();Iterator<String> keys=records().keys();while(keys.hasNext())read.add(keys.next());
-    arrivalsWorker.execute(()->{
+    arrivalsJob=arrivalsWorker.submit(()->{
       if(serial!=generation||Thread.currentThread().isInterrupted())return;
       try{
-        Dav client=client();
-        NewArrivals.scan(rootUrl,client::list,read,hidden,now,cutoff,()->serial!=generation||Thread.currentThread().isInterrupted(),result->ui.post(()->{
+        try(Dav client=client()){
+        synchronized(arrivalsLock){if(serial!=generation||Thread.currentThread().isInterrupted())return;arrivalsClient=client;}
+        try{NewArrivals.scan(rootUrl,client::list,read,hidden,now,cutoff,()->serial!=generation||Thread.currentThread().isInterrupted(),result->ui.post(()->{
           if(serial!=generation||!"home".equals(screen))return;
-          if(result.complete&&result.errors==0&&!result.limited){arrivalsCache=result;arrivalsCacheRoot=rootUrl;arrivalsCacheHidden=new HashSet<>(hidden);arrivalsCacheTime=System.currentTimeMillis();}
+          arrivalsCache=result;arrivalsCacheRoot=rootUrl;arrivalsCacheHidden=new HashSet<>(hidden);
           long current=System.currentTimeMillis();long currentCutoff=java.time.Instant.ofEpochMilli(current).atZone(java.time.ZoneId.systemDefault()).minusMonths(1).toInstant().toEpochMilli();
           displayNewArrivals(status,list,result,current,currentCutoff);
-        }));
+        }));}finally{synchronized(arrivalsLock){if(arrivalsClient==client)arrivalsClient=null;}}}
       }catch(Exception e){ui.post(()->{if(serial==generation&&"home".equals(screen))status.setText("新着を取得できません: "+(e.getMessage()==null?"不明なエラー":e.getMessage()));});}
     });
   }
@@ -178,9 +184,9 @@ public class MainActivity extends Activity {
     smbShare.setSingleLine();smbShare.setHint("共有名（例: Comic）");smbShare.setText(prefs.getString("smb_share",""));l.addView(smbShare);
     smbUser.setSingleLine();smbUser.setHint("Sambaユーザー名");smbUser.setText(prefs.getString("smb_user",""));l.addView(smbUser);
     smbPass.setSingleLine();smbPass.setHint("Sambaパスワード");smbPass.setInputType(129);try{smbPass.setText(SmbPasswordStore.read(prefs));}catch(Exception e){message("保存済みSambaパスワードを読み込めません");}l.addView(smbPass);
-    l.addView(button("Wi-Fi判定の位置情報権限を許可",()->new AlertDialog.Builder(this).setTitle("Wi-Fi名の判定")
-      .setMessage("Androidでは接続中のWi-Fi名を確認するため位置情報権限が必要な場合があります。「正確な位置情報」の許可と端末の位置情報設定が必要な場合があります。権限がない、またはWi-Fi名を取得できない場合はWebDAVを使用します。位置情報そのものを取得・送信する目的ではありません。")
-      .setNegativeButton("キャンセル",null).setPositiveButton("権限を確認",(d,w)->requestPermissions(new String[]{android.Manifest.permission.ACCESS_FINE_LOCATION,android.Manifest.permission.ACCESS_COARSE_LOCATION},301)).show()));
+    l.addView(button("Sambaの保存パスワードをリセット",()->new AlertDialog.Builder(this).setTitle("Sambaパスワードのリセット")
+      .setMessage("Sambaの保存済みパスワードと暗号化鍵を削除します。再接続には再入力が必要です。WebDAVの設定や履歴は削除しません。")
+      .setNegativeButton("キャンセル",null).setPositiveButton("削除",(d,w)->{try{SmbPasswordStore.reset(prefs);smbPass.setText("");message("Sambaパスワードをリセットしました。");}catch(Exception e){message("リセットに失敗しました: "+e.getMessage());}}).show()));
     l.addView(button("非表示タイトル",this::hiddenTitles));
     CheckBox prefetch=new CheckBox(this);prefetch.setText("読み終わる前に次巻をダウンロード（90％付近）");prefetch.setChecked(prefs.getBoolean("prefetch_next",true));l.addView(prefetch);l.addView(button("閲覧履歴を管理",this::history));l.addView(button("アプリの更新を確認",this::checkUpdate));l.addView(button("保存",()->{String url=u.getText().toString().trim();if(!url.startsWith("https://")){message("HTTPSのURLを入力してください");return;}if(!url.endsWith("/"))url+="/";String host=smbHost.getText().toString().trim(),share=smbShare.getText().toString().trim(),ssid=smbSsid.getText().toString().trim(),smbUsername=smbUser.getText().toString().trim();
     if(smbEnabled.isChecked()&&(!SmbAddress.privateIpv4(host)||share.isEmpty()||share.contains("/")||share.contains("\\")||smbUsername.isEmpty()||ssid.isEmpty())){message("SambaにはプライベートIPv4・共有名・ユーザー名・Wi-Fi名を入力してください");return;}
@@ -271,8 +277,8 @@ public class MainActivity extends Activity {
       if(!ready[0])return;
       coverSerial++;final int serial=coverSerial;visibleCoverChecks.clear();list.removeAllViews();
       ArrayList<Dav.Item> visible=new ArrayList<>();
-      Set<String> hidden=hiddenFolders();
-      for(Dav.Item item:loaded)if(!HiddenFolders.hidden(hidden,item.url)&&BrowseSearch.matches(item.name,item.dir,query.getText().toString()))visible.add(item);
+      Set<String> hidden=hiddenFolders();HiddenFolders.Index hiddenIndex=new HiddenFolders.Index(hidden);
+      for(Dav.Item item:loaded)if(!hiddenIndex.hidden(item.url)&&BrowseSearch.matches(item.name,item.dir,query.getText().toString()))visible.add(item);
       TitleSort titleSort=new TitleSort();
       visible.sort((a,b)->{if(a.dir!=b.dir)return a.dir?-1:1;return descending?titleSort.compare(b.name,a.name):titleSort.compare(a.name,b.name);});
       for(Dav.Item item:visible){
@@ -312,7 +318,7 @@ public class MainActivity extends Activity {
               });
             });
           };
-          boolean suppressCover=HiddenFolders.hasDescendant(hidden,item.url);
+          boolean suppressCover=hiddenIndex.hasDescendant(item.url);
           if(suppressCover)coverStatus.setText("表紙非表示");else visibleCoverChecks.add(check);
           coverFrame.setOnClickListener(w->{if(suppressCover){folders.push(new String[]{url,name});browse(item.url,item.name);}else if(failed[0]){failed[0]=false;check.run();}else if(cover.getDrawable()!=null){folders.push(new String[]{url,name});browse(item.url,item.name);}});
         }
@@ -337,7 +343,7 @@ public class MainActivity extends Activity {
       public void afterTextChanged(android.text.Editable e){}
     });
     refresh.run();
-    async(()->{Dav d=client();d.discoverExistingUrls();return d.list(url);},items->{loaded.addAll(items);ready[0]=true;refresh.run();});
+    async(()->{try(Dav d=client()){d.discoverExistingUrls();return d.list(url);}},items->{loaded.addAll(items);ready[0]=true;refresh.run();});
   }
   void openBook(String url,String name,String folder,String fname){
     closeCurrentBook();screen="reader";DownloadCache.pin(null);DownloadCache.touch(this,url);DownloadCache.pin(url);
@@ -346,8 +352,8 @@ public class MainActivity extends Activity {
     JSONArray arr=rec.optJSONArray("cuts");if(arr!=null)for(int i=0;i<arr.length();i++)cuts.add(arr.optInt(i));
     clear();loadingBars();root.addView(button("← ホーム",this::home));TextView loading=text("本を開いています…",20);root.addView(loading);downloadState="保存準備中";
     async(()->{
-      Dav d=client();DownloadCache.start(this,d,url,state->ui.post(()->{if(reading && url.equals(bookUrl)){downloadState=state;if(downloadLabel!=null)downloadLabel.setText("端末への保存: "+state);}}));
-      return RemoteBooks.open(d,url,name);
+      Dav d=client();try{DownloadCache.start(this,d,url,state->ui.post(()->{if(reading && url.equals(bookUrl)){downloadState=state;if(downloadLabel!=null)downloadLabel.setText("端末への保存: "+state);}}));
+      return RemoteBooks.open(d,url,name);}catch(Exception|Error e){d.close();throw e;}
     },z->{
       zip=z;if(rec.optInt("orientationCount",-1)==z.pages.size()&&rec.optLong("orientationLength",-1)==z.archiveLength)z.orientations.putAll(OrientationCodec.decode(z.pages.size(),rec.optString("orientations","")));
       page=Math.max(0,Math.min(page,zip.pages.size()-1));render();
@@ -547,14 +553,15 @@ public class MainActivity extends Activity {
     updatePrefetchStatus(currentUrl,"次巻を確認中…");
     prefetchWorker.execute(()->{
       try{
-        Dav d=client();Dav.Item item=NextBook.find(d.list(parent),currentUrl);
-        if(item==null){updatePrefetchStatus(currentUrl,"次巻はありません");return;}
-        ui.post(()->{
+        Dav d=client();Dav.Item item;
+        try{item=NextBook.find(d.list(parent),currentUrl);}catch(Exception e){d.close();throw e;}
+        if(item==null){d.close();updatePrefetchStatus(currentUrl,"次巻はありません");return;}
+        if(!ui.post(()->{try{
           // Do not start a stale prefetch after the reader has moved to another book.
           if(!reading || !currentUrl.equals(bookUrl))return;
           updatePrefetchStatus(currentUrl,"次巻を保存中: "+clean(item.name));
           DownloadCache.start(getApplicationContext(),d,item.url,state->updatePrefetchStatus(currentUrl,"次巻: "+clean(item.name)+" — "+state));
-        });
+        }finally{d.close();}}))d.close();
       }catch(Exception e){updatePrefetchStatus(currentUrl,"次巻の先読みを開始できませんでした");}
     });
   }
@@ -576,7 +583,7 @@ public class MainActivity extends Activity {
     try{o.put("finished",true);o.put("time",System.currentTimeMillis());put(bookUrl,o);}catch(Exception ignored){}
     DownloadCache.delete(this,finishedUrl);
     AlertDialog dialog=new AlertDialog.Builder(this).setTitle("読み終わりました").setMessage("次の巻を確認しています…").setCancelable(false).setPositiveButton("次の巻へ",null).setNegativeButton("ホームへ戻る",(d,w)->home()).create();
-    dialog.setOnShowListener(v->{Button b=dialog.getButton(AlertDialog.BUTTON_POSITIVE);b.setEnabled(false);async(()->{Dav d=client();return NextBook.find(d.list(parent),finishedUrl);},item->{if(!dialog.isShowing())return;if(item==null){dialog.setMessage("次の巻はありません。ホームへ戻ってください。");}else{dialog.setMessage("次の巻: "+clean(item.name));b.setEnabled(true);b.setOnClickListener(w->{dialog.dismiss();openBook(item.url,item.name,parent,folderName);});}});});
+    dialog.setOnShowListener(v->{Button b=dialog.getButton(AlertDialog.BUTTON_POSITIVE);b.setEnabled(false);async(()->{try(Dav d=client()){return NextBook.find(d.list(parent),finishedUrl);}},item->{if(!dialog.isShowing())return;if(item==null){dialog.setMessage("次の巻はありません。ホームへ戻ってください。");}else{dialog.setMessage("次の巻: "+clean(item.name));b.setEnabled(true);b.setOnClickListener(w->{dialog.dismiss();openBook(item.url,item.name,parent,folderName);});}});});
     dialog.show();
   }
   void backPage(){if(zip==null||page<=0)return;Integer p=previous.get(page);if(p==null){jumpToPage(page-1);return;}page=p;next=0;controlsVisible=false;render();}

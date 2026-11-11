@@ -13,5 +13,8 @@ class TestHidden{
   check(HiddenFolders.hasDescendant(hidden,"https://example.jp/漫画/"),"ancestor cover must not expose hidden descendant");
   check(!HiddenFolders.hasDescendant(hidden,"https://example.jp/その他/"),"unrelated cover unaffected");
   check(!HiddenFolders.hidden(hidden,""),"empty record is not hidden");
+  HiddenFolders.Index index=new HiddenFolders.Index(hidden);
+  check(index.hidden("https://example.jp/漫画/作品%20A/別/巻01.zip")&&!index.hidden("https://example.jp/漫画/作品%20A2/"),"preparsed hidden index preserves matching");
+  check(index.hasDescendant("https://example.jp/漫画/")&&index.explicitlyHidden("https://example.jp:443/漫画/作品%20A"),"preparsed ancestor and exact match");
  }
 }

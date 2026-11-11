@@ -33,6 +33,9 @@ final class DavXml {
         if(textDepth==depth){if("href".equals(textName))href=text;else if("status".equals(textName))groupStatus=text.toString().trim();else if("creationdate".equals(textName))groupCreation=text.toString().trim();textDepth=-1;textName=null;text=null;}
         if(propstatDepth==depth&&"DAV:".equals(parser.getNamespace())&&"propstat".equals(name)){
           if(groupStatus!=null&&groupStatus.matches("(?i)HTTP/\\S+\\s+2\\d\\d(?:\\s+.*)?")){directory|=groupDirectory;if(groupCreation!=null&&!groupCreation.isEmpty())creation=groupCreation;}
+          // Some non-compliant servers omit propstat status: retain collection
+          // classification, but never trust an unconfirmed creation date.
+          else if(groupStatus==null&&groupDirectory)directory=true;
           propstatDepth=-1;
         }
         if(responseDepth==depth&&"DAV:".equals(parser.getNamespace())&&"response".equals(name)){if(href!=null)result.add(new Entry(href.toString(),directory,creation));responseDepth=-1;}

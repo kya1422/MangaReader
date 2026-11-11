@@ -28,11 +28,14 @@ final class FolderCovers {
     File file=cacheFile(dir,folderUrl,book,page,crop);
     Bitmap existing=cachedFile(file);if(existing!=null)return existing;
     if(cancel.cancelled())throw new IOException("表紙取得を中止しました");
-    Dav dav=client.get();
-    if(book==null){Dav.Item first=NestedBook.find(folderUrl,dav::list,cancel);if(first==null)return null;book=first.url;name=first.name;page=0;}
-    RemoteZip zip=RemoteBooks.open(dav,book,name,cancel::cancelled);
-    Bitmap decoded;
-    try{if(page<0||page>=zip.pages.size())throw new IOException("指定した表紙ページが見つかりません");decoded=zip.bitmap(page,320,220);}finally{zip.cancel();zip.close();}
+    Bitmap decoded;boolean manual=book!=null;
+    try(Dav dav=client.get()){
+      if(book==null){Dav.Item first=NestedBook.find(folderUrl,dav::list,cancel);if(first==null)return null;book=first.url;name=first.name;page=0;}
+      try{
+        RemoteZip zip=RemoteBooks.open(dav,book,name,cancel::cancelled);
+        try{if(page<0||page>=zip.pages.size())throw new IOException("指定した表紙ページが見つかりません");decoded=zip.bitmap(page,320,220);}finally{zip.cancel();zip.close();}
+      }catch(Exception e){if(manual&&!cancel.cancelled())throw new IOException("手動表紙を取得できません。フォルダ長押し→手動の表紙設定を解除で自動表紙に戻せます",e);throw e;}
+    }
     if(cancel.cancelled()){decoded.recycle();throw new IOException("表紙取得を中止しました");}
     Bitmap small=makeSmall(decoded,crop);try{synchronized(CACHE_IO){if(cancel.cancelled())throw new IOException("表紙取得を中止しました");write(file,small);trim(dir);}return small;}catch(Exception e){small.recycle();throw e;}
   }
