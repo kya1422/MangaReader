@@ -14,12 +14,15 @@ class TestArrivals {
   folders.put(hidden,Arrays.asList(file(hidden+"secret.zip",valid2)));
   Set<String> seenFolders=new HashSet<>();NewArrivals.Result r=NewArrivals.scan(root,url->{seenFolders.add(url);if(url.equals(error))throw new java.io.IOException("denied");return folders.get(url);},Collections.singleton(root+"already.zip"),Collections.singleton(hidden),now,cutoff,()->false,x->{});
   check(r.complete&&r.errors==1&&r.scanned==3,"recursive scan reports failed folder");
-  check(!ArrivalCachePolicy.cacheable(r),"partial failure is not cacheable");
   NewArrivals.Result progress=new NewArrivals.Result(Collections.emptyList(),1,0,0,false,false);
   NewArrivals.Result good=new NewArrivals.Result(Collections.emptyList(),1,0,0,false,true);
   NewArrivals.Result limited=new NewArrivals.Result(Collections.emptyList(),1,0,0,true,true);
-  check(!ArrivalCachePolicy.cacheable(progress)&&!ArrivalCachePolicy.cacheable(limited)&&ArrivalCachePolicy.cacheable(good),"cache only complete, successful and non-truncated results");
-  check(ArrivalCachePolicy.fresh(1000,1000+ArrivalCachePolicy.TTL-1)&&!ArrivalCachePolicy.fresh(1000,1000+ArrivalCachePolicy.TTL)&&!ArrivalCachePolicy.fresh(1000,999)&&!ArrivalCachePolicy.fresh(-1,100),"30 minute monotonic TTL including boundary and clock rollback");
+  NewArrivals.Result badRoot=new NewArrivals.Result(Collections.emptyList(),1,1,0,false,true);
+  NewArrivals.Result manyErrors=new NewArrivals.Result(Collections.emptyList(),10,6,0,false,true);
+  check(!ArrivalCachePolicy.cacheable(progress)&&!ArrivalCachePolicy.cacheable(limited)&&ArrivalCachePolicy.cacheable(good),"cache only completed and non-truncated scans");
+  check(ArrivalCachePolicy.cacheable(r)&&!ArrivalCachePolicy.cacheable(badRoot)&&!ArrivalCachePolicy.cacheable(manyErrors),"few errors cache only if at least one folder succeeded");
+  check(ArrivalCachePolicy.fresh(good,1000,1000+ArrivalCachePolicy.TTL-1)&&!ArrivalCachePolicy.fresh(good,1000,1000+ArrivalCachePolicy.TTL)&&!ArrivalCachePolicy.fresh(good,1000,999)&&!ArrivalCachePolicy.fresh(good,-1,100),"30 minute successful result TTL and boundary");
+  check(ArrivalCachePolicy.fresh(r,1000,1000+ArrivalCachePolicy.ERROR_TTL-1)&&!ArrivalCachePolicy.fresh(r,1000,1000+ArrivalCachePolicy.ERROR_TTL)&&!ArrivalCachePolicy.fresh(progress,1000,1001),"five minute error TTL and no caching progress");
   check(!seenFolders.contains(hidden),"hidden folders are not scanned");
   check(r.unknown==1,"missing date reported");
   check(r.books.size()==3&&r.books.get(0).url.equals(sub+"new.rar")&&r.books.get(1).url.equals(sub+"second.cbz")&&r.books.get(2).url.endsWith("boundary.zip"),"unread, cutoff, direct children and descending date");

@@ -130,7 +130,7 @@ public class MainActivity extends Activity {
   void displayNewArrivals(TextView status,LinearLayout list,NewArrivals.Result result,long now,long cutoff){
     ArrayList<NewArrivals.Book> visible=new ArrayList<>();HiddenFolders.Index hidden=new HiddenFolders.Index(hiddenFolders());JSONObject all=records();
     for(NewArrivals.Book book:result.books)if(book.date>=cutoff&&book.date<=now&&!all.has(book.url)&&!hidden.hidden(book.url))visible.add(book);
-    String label=(result.complete?"取得完了":"途中結果")+"："+visible.size()+"冊 / "+result.scanned+"フォルダ";
+    String label=(result.complete?(result.errors>0||result.limited?"一部取得できません":"取得完了"):"途中結果")+"："+visible.size()+"冊 / "+result.scanned+"フォルダ";
     if(visible.size()>100)label+="（新しい順に100冊表示）";
     if(result.errors>0)label+="・取得失敗 "+result.errors+"フォルダ";
     if(result.unknown>0)label+="・作成日不明 "+result.unknown+"冊（対象外）";
@@ -148,7 +148,7 @@ public class MainActivity extends Activity {
     final String rootUrl=prefs.getString("url","");if(rootUrl.isEmpty()){status.setText("接続設定後に新着を確認できます");return;}
     final int serial=generation;Set<String> hidden=hiddenFolders();
     final long now=System.currentTimeMillis(),cutoff=java.time.Instant.ofEpochMilli(now).atZone(java.time.ZoneId.systemDefault()).minusMonths(1).toInstant().toEpochMilli();
-    if(ArrivalCachePolicy.cacheable(arrivalsCache)&&rootUrl.equals(arrivalsCacheRoot)&&hidden.equals(arrivalsCacheHidden)&&ArrivalCachePolicy.fresh(arrivalsCacheTime,android.os.SystemClock.elapsedRealtime())){
+    if(ArrivalCachePolicy.cacheable(arrivalsCache)&&rootUrl.equals(arrivalsCacheRoot)&&hidden.equals(arrivalsCacheHidden)&&ArrivalCachePolicy.fresh(arrivalsCache,arrivalsCacheTime,android.os.SystemClock.elapsedRealtime())){
       displayNewArrivals(status,list,arrivalsCache,now,cutoff);status.append("（前回の結果・更新で再取得）");return;
     }
     Set<String> read=new HashSet<>();Iterator<String> keys=records().keys();while(keys.hasNext())read.add(keys.next());
@@ -217,7 +217,7 @@ public class MainActivity extends Activity {
         .setMessage(clean(name)+"\n\n読書位置・既読状態・見開き設定と、端末に保存したこの本のZIPを削除します。保存中の場合は中止します。WebDAV上の元ファイルは削除しません。")
         .setNegativeButton("キャンセル",null).setPositiveButton("削除",(d,w)->{
           if(!DownloadCache.delete(this,url)){message("端末内ファイルを削除できませんでした。履歴は残しています。");return;}
-          all.remove(url);prefs.edit().putString("records",all.toString()).apply();history();
+          all.remove(url);prefs.edit().putString("records",all.toString()).apply();arrivalsCache=null;history();
         }).show());
     }
   }
