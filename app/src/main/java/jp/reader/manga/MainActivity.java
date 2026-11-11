@@ -337,7 +337,7 @@ public class MainActivity extends Activity {
       public void afterTextChanged(android.text.Editable e){}
     });
     refresh.run();
-    async(()->{Dav d=client();return d.list(url);},items->{loaded.addAll(items);ready[0]=true;refresh.run();});
+    async(()->{Dav d=client();d.discoverExistingUrls();return d.list(url);},items->{loaded.addAll(items);ready[0]=true;refresh.run();});
   }
   void openBook(String url,String name,String folder,String fname){
     closeCurrentBook();screen="reader";DownloadCache.pin(null);DownloadCache.touch(this,url);DownloadCache.pin(url);

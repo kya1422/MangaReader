@@ -16,5 +16,17 @@ class TestSmbPathMap{
   aliases.remember("https://example.com/Comic/作品/2.zip");
   check(aliases.lookup("https://example.com/Comic/%E4%BD%9C%E5%93%81/2.zip").equals("https://example.com/Comic/作品/2.zip"),"unencoded legacy URL reused");
   check(aliases.lookup("https://example.com/Comic/%E4%BD%9C%E5%93%81/3.zip").equals("https://example.com/Comic/%E4%BD%9C%E5%93%81/3.zip"),"unknown path keeps generated URL");
+  java.util.Map<String,String> disk=new java.util.HashMap<>();
+  SmbAliases discovery=new SmbAliases("https://example.com/Comic/",disk::get);
+  String legacy="https://example.com/Comic/%e4%bd%9c%e5%93%81/%5Bauthor%5D/";
+  String generated="https://example.com/Comic/%E4%BD%9C%E5%93%81/%5Bauthor%5D/";
+  disk.put(discovery.key(legacy),legacy);
+  SmbAliases newClient=new SmbAliases("https://example.com/Comic/",disk::get);
+  check(newClient.lookup(generated).equals(legacy),"WebDAV discovery preserves old cover key across clients");
+  newClient.remember("https://example.com/Comic/作品/%5Bauthor%5D/");
+  check(newClient.lookup(generated).equals("https://example.com/Comic/作品/%5Bauthor%5D/"),"existing record URL takes precedence");
+  disk.put(discovery.key(generated),"https://elsewhere.invalid/Comic/other/");
+  check(discovery.lookup(generated).equals(generated),"reject corrupt or cross-origin persisted alias");
+  check(!discovery.key(generated).equals(new SmbAliases("https://another.example/Comic/").key("https://another.example/Comic/%E4%BD%9C%E5%93%81/%5Bauthor%5D/")),"alias index separates WebDAV roots");
  }
 }
