@@ -55,6 +55,9 @@ final class SmbBackend implements Closeable {
     }
     public void close(){if(disk!=null)try{disk.close();}catch(Exception ignored){}if(session!=null)try{session.close();}catch(Exception ignored){}if(connection!=null)try{connection.close();}catch(Exception ignored){}if(client!=null)try{client.close();}catch(Exception ignored){}}
   }
+  void checkConnection()throws Exception{
+    reuse(open->{if(!open.connection.isConnected()||!open.disk.isConnected())throw new IOException("SMB接続が切れました");return null;});
+  }
   private com.hierynomus.smbj.share.File openFile(OpenShare open,String url){return open.disk.openFile(paths.relative(url),EnumSet.of(AccessMask.GENERIC_READ),null,SMB2ShareAccess.ALL,SMB2CreateDisposition.FILE_OPEN,null);}
   List<Entry> list(String url)throws Exception{
     paths.relative(url);

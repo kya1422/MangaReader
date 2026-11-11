@@ -33,7 +33,7 @@ public class MainActivity extends Activity {
     else message("正確な位置情報が許可されていないためWi-Fi名を取得できません。WebDAVは引き続き利用できます。");
   }
   final ExecutorService arrivalsWorker=Executors.newFixedThreadPool(2);
-  NewArrivals.Result arrivalsCache;String arrivalsCacheRoot;Set<String> arrivalsCacheHidden;
+  NewArrivals.Result arrivalsCache;String arrivalsCacheRoot;Set<String> arrivalsCacheHidden;long arrivalsCacheTime=-1;
   volatile Future<?> arrivalsJob; private final Object arrivalsLock=new Object();private Dav arrivalsClient;
   void cancelArrivals(){Future<?> job=arrivalsJob;arrivalsJob=null;if(job!=null)job.cancel(true);Dav client;synchronized(arrivalsLock){client=arrivalsClient;}if(client!=null)client.cancelPending();}
   final CoverDispatcher coverWorker=new CoverDispatcher(); final ExecutorService bookCloser=Executors.newSingleThreadExecutor(); volatile int coverSerial=0;
@@ -148,7 +148,7 @@ public class MainActivity extends Activity {
     final String rootUrl=prefs.getString("url","");if(rootUrl.isEmpty()){status.setText("接続設定後に新着を確認できます");return;}
     final int serial=generation;Set<String> hidden=hiddenFolders();
     final long now=System.currentTimeMillis(),cutoff=java.time.Instant.ofEpochMilli(now).atZone(java.time.ZoneId.systemDefault()).minusMonths(1).toInstant().toEpochMilli();
-    if(arrivalsCache!=null&&rootUrl.equals(arrivalsCacheRoot)&&hidden.equals(arrivalsCacheHidden)){
+    if(ArrivalCachePolicy.cacheable(arrivalsCache)&&rootUrl.equals(arrivalsCacheRoot)&&hidden.equals(arrivalsCacheHidden)&&ArrivalCachePolicy.fresh(arrivalsCacheTime,android.os.SystemClock.elapsedRealtime())){
       displayNewArrivals(status,list,arrivalsCache,now,cutoff);status.append("（前回の結果・更新で再取得）");return;
     }
     Set<String> read=new HashSet<>();Iterator<String> keys=records().keys();while(keys.hasNext())read.add(keys.next());
@@ -159,7 +159,7 @@ public class MainActivity extends Activity {
         synchronized(arrivalsLock){if(serial!=generation||Thread.currentThread().isInterrupted())return;arrivalsClient=client;}
         try{NewArrivals.scan(rootUrl,client::list,read,hidden,now,cutoff,()->serial!=generation||Thread.currentThread().isInterrupted(),result->ui.post(()->{
           if(serial!=generation||!"home".equals(screen))return;
-          arrivalsCache=result;arrivalsCacheRoot=rootUrl;arrivalsCacheHidden=new HashSet<>(hidden);
+          if(ArrivalCachePolicy.cacheable(result)){arrivalsCache=result;arrivalsCacheRoot=rootUrl;arrivalsCacheHidden=new HashSet<>(hidden);arrivalsCacheTime=android.os.SystemClock.elapsedRealtime();}
           long current=System.currentTimeMillis();long currentCutoff=java.time.Instant.ofEpochMilli(current).atZone(java.time.ZoneId.systemDefault()).minusMonths(1).toInstant().toEpochMilli();
           displayNewArrivals(status,list,result,current,currentCutoff);
         }));}finally{synchronized(arrivalsLock){if(arrivalsClient==client)arrivalsClient=null;}}}

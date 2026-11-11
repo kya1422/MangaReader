@@ -58,7 +58,7 @@ final class Dav implements Closeable {
     if(routeSelected){if(usingSmb&&!SmbWifi.matches(ctx,smbSsid)){if(transferStarted)throw new IOException("指定Wi-Fiから切断されました。本を開き直してください");usingSmb=false;}return usingSmb;}
     if(Thread.currentThread().isInterrupted())throw new InterruptedException("接続を中止しました");
     if(smb!=null&&SmbWifi.matches(ctx,smbSsid)){
-      try{smb.list(base);usingSmb=true;}catch(Exception|LinkageError e){if(Thread.currentThread().isInterrupted())throw new IOException("接続を中止しました",e);usingSmb=false;fallbackReason="SMB接続失敗"+status(e);}
+      try{smb.checkConnection();usingSmb=true;}catch(Exception|LinkageError e){if(Thread.currentThread().isInterrupted())throw new IOException("接続を中止しました",e);usingSmb=false;fallbackReason="SMB接続失敗"+status(e);}
     }
     routeSelected=true;return usingSmb;
   }

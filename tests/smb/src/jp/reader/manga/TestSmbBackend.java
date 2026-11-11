@@ -5,11 +5,14 @@ class TestSmbBackend{
  public static void main(String[] a)throws Exception{
   String root="https://dav.example/Comic/";
   SmbBackend smb=new SmbBackend(root,"127.0.0.1",1445,"books","smbtest","test-password".toCharArray(),"");
-  List<SmbBackend.Entry> rows=smb.list(root);SmbBackend.Entry dir=null;for(SmbBackend.Entry e:rows)if(e.name.equals("作品"))dir=e;
+  smb.checkConnection();
+  java.lang.reflect.Field sharedField=SmbBackend.class.getDeclaredField("shared");sharedField.setAccessible(true);Object preflight=sharedField.get(smb);
+  ok(preflight!=null,"SMB connection check opens share");
+  List<SmbBackend.Entry> rows=smb.list(root);ok(sharedField.get(smb)==preflight,"first listing reuses checked share");SmbBackend.Entry dir=null;for(SmbBackend.Entry e:rows)if(e.name.equals("作品"))dir=e;
   ok(dir!=null&&dir.directory,"SMB UTF-8 directory listing");
   List<SmbBackend.Entry> files=smb.list(dir.url);SmbBackend.Entry small=null,large=null;for(SmbBackend.Entry e:files){if(e.name.equals("01.zip"))small=e;if(e.name.equals("large.zip"))large=e;}
   ok(small!=null&&large!=null,"SMB archive listing");
-  java.lang.reflect.Field sharedField=SmbBackend.class.getDeclaredField("shared");sharedField.setAccessible(true);Object original=sharedField.get(smb);
+  Object original=sharedField.get(smb);
   String url=small.url;SmbBackend.Range p=smb.range(url,10,17);ok(p.total==36&&new String(p.data,"UTF-8").equals("abcdefgh"),"SMB range exact");
   ok(original!=null&&sharedField.get(smb)==original,"SMB session reused for multiple requests");
   java.util.concurrent.ExecutorService executor=java.util.concurrent.Executors.newFixedThreadPool(4);
