@@ -94,6 +94,17 @@ public class MainActivity extends Activity {
   }
   Button button(String s,Runnable r){Button b=new Button(this);b.setText(s);b.setAllCaps(false);b.setOnClickListener(v->r.run());return b;}
   LinearLayout scroll(){ScrollView sv=new ScrollView(this);LinearLayout l=new LinearLayout(this);l.setOrientation(1);sv.addView(l);root.addView(sv,new LinearLayout.LayoutParams(-1,0,1));return l;}
+  int dp(float value){return Math.round(value*getResources().getDisplayMetrics().density);}
+  LinearLayout homeSection(LinearLayout list,String title){
+    LinearLayout section=new LinearLayout(this);section.setOrientation(LinearLayout.VERTICAL);
+    LinearLayout.LayoutParams sectionParams=new LinearLayout.LayoutParams(-1,-2);
+    sectionParams.setMargins(dp(8),dp(12),dp(8),dp(12));list.addView(section,sectionParams);
+    TextView heading=text(title,20);heading.setTypeface(Typeface.DEFAULT,Typeface.BOLD);
+    heading.setTextColor(0xffffffff);heading.setBackgroundColor(0xff222222);
+    heading.setPadding(dp(14),dp(10),dp(14),dp(10));section.addView(heading,new LinearLayout.LayoutParams(-1,-2));
+    LinearLayout body=new LinearLayout(this);body.setOrientation(LinearLayout.VERTICAL);body.setBackgroundColor(0xffffffff);
+    body.setPadding(dp(8),dp(4),dp(8),dp(8));section.addView(body,new LinearLayout.LayoutParams(-1,-2));return body;
+  }
   void message(String s){Toast.makeText(this,s,Toast.LENGTH_LONG).show();}
   <T> void async(Task<T> task,Done<T> done){async(task,done,e->message("エラー: "+e.getMessage()));}
   <T> void async(Task<T> task,Done<T> done,java.util.function.Consumer<Exception> fail){
@@ -116,16 +127,16 @@ public class MainActivity extends Activity {
   String clean(String s){return TitleSort.displayTitle(s);}
   String author(String s){java.util.regex.Matcher m=java.util.regex.Pattern.compile("\\[([^]]+)\\]").matcher(s);return m.find()?m.group(1):"";}
   void home(){manualCoverTarget=null;manualCoverName=null;screen="home";folders.clear();DownloadCache.pin(null);DownloadCache.cleanup(this);reading=false;closeCurrentBook();clear();release();root.addView(text("漫画リーダー",25));LinearLayout bar=new LinearLayout(this);bar.addView(button("フォルダ",()->browse(prefs.getString("url",""),"フォルダ")));bar.addView(button("接続設定",this::settings));root.addView(bar);LinearLayout list=scroll();
-    list.addView(text("新着・未読（1か月）",21));
-    LinearLayout arrivalHeader=new LinearLayout(this);TextView arrivalStatus=text("新着を確認中…",13);arrivalHeader.addView(arrivalStatus,new LinearLayout.LayoutParams(0,-2,1));arrivalHeader.addView(button("更新",()->{arrivalsCache=null;home();}));list.addView(arrivalHeader);
-    LinearLayout arrivalList=new LinearLayout(this);arrivalList.setOrientation(LinearLayout.VERTICAL);list.addView(arrivalList);
+    LinearLayout arrivalsSection=homeSection(list,"新着・未読（1か月）");
+    LinearLayout arrivalHeader=new LinearLayout(this);TextView arrivalStatus=text("新着を確認中…",13);arrivalHeader.addView(arrivalStatus,new LinearLayout.LayoutParams(0,-2,1));arrivalHeader.addView(button("更新",()->{arrivalsCache=null;home();}));arrivalsSection.addView(arrivalHeader);
+    LinearLayout arrivalList=new LinearLayout(this);arrivalList.setOrientation(LinearLayout.VERTICAL);arrivalsSection.addView(arrivalList);
     startNewArrivals(arrivalStatus,arrivalList,new ArrivalViewState());
     JSONObject all=records();ArrayList<JSONObject> recent=new ArrayList<>();Iterator<String> keys=all.keys();while(keys.hasNext()){JSONObject o=all.optJSONObject(keys.next());if(o!=null&&!o.optBoolean("finished")&&!hiddenRecord(o))recent.add(o);}recent.sort((a,b)->Long.compare(b.optLong("time"),a.optLong("time")));
-    list.addView(text("最近読んだ本",21));if(recent.isEmpty())list.addView(text("読みかけの本はありません",14));for(JSONObject o:recent){String name=o.optString("name"),url=o.optString("url"),fu=o.optString("folder"),fn=o.optString("folderName");TextView v=entry(clean(name),author(name)+"  途中 "+(o.optInt("page")+1)+" / "+o.optInt("total"));list.addView(v);v.setOnClickListener(w->openBook(url,name,fu,fn));}
-    list.addView(text("読みかけのシリーズ",21));HashSet<String> seen=new HashSet<>();ArrayList<JSONObject> series=new ArrayList<>();for(JSONObject o:recent)if(seen.add(o.optString("folder")))series.add(o);
+    LinearLayout recentSection=homeSection(list,"最近読んだ本");if(recent.isEmpty())recentSection.addView(text("読みかけの本はありません",14));for(JSONObject o:recent){String name=o.optString("name"),url=o.optString("url"),fu=o.optString("folder"),fn=o.optString("folderName");TextView v=entry(clean(name),author(name)+"  途中 "+(o.optInt("page")+1)+" / "+o.optInt("total"));recentSection.addView(v);v.setOnClickListener(w->openBook(url,name,fu,fn));}
+    LinearLayout seriesSection=homeSection(list,"読みかけのシリーズ");HashSet<String> seen=new HashSet<>();ArrayList<JSONObject> series=new ArrayList<>();for(JSONObject o:recent)if(seen.add(o.optString("folder")))series.add(o);
     String sort=prefs.getString("sort","最近読んだ順");if(sort.equals("タイトル順")){TitleSort ts=new TitleSort();series.sort((a,b)->ts.compare(a.optString("folderName"),b.optString("folderName")));}else if(sort.equals("著者順"))series.sort((a,b)->RemoteZip.natural(author(a.optString("folderName")),author(b.optString("folderName"))));
-    list.addView(button("並び替え: "+sort,()->new AlertDialog.Builder(this).setTitle("並び替え").setItems(new String[]{"最近読んだ順","タイトル順","著者順"},(d,n)->{prefs.edit().putString("sort",new String[]{"最近読んだ順","タイトル順","著者順"}[n]).apply();home();}).show()));
-    for(JSONObject o:series){String fn=o.optString("folderName"),fu=o.optString("folder"),bn=o.optString("name");TextView v=entry(clean(fn),author(fn)+"\n"+clean(bn)+"  途中 "+(o.optInt("page")+1)+" / "+o.optInt("total"));list.addView(v);v.setOnClickListener(w->browse(fu,fn));}
+    seriesSection.addView(button("並び替え: "+sort,()->new AlertDialog.Builder(this).setTitle("並び替え").setItems(new String[]{"最近読んだ順","タイトル順","著者順"},(d,n)->{prefs.edit().putString("sort",new String[]{"最近読んだ順","タイトル順","著者順"}[n]).apply();home();}).show()));
+    for(JSONObject o:series){String fn=o.optString("folderName"),fu=o.optString("folder"),bn=o.optString("name");TextView v=entry(clean(fn),author(fn)+"\n"+clean(bn)+"  途中 "+(o.optInt("page")+1)+" / "+o.optInt("total"));seriesSection.addView(v);v.setOnClickListener(w->browse(fu,fn));}
   }
   static final class ArrivalViewState {int page;final ArrayList<String> path=new ArrayList<>();}
   void addArrivalRow(LinearLayout list,NewArrivals.Book book,java.text.SimpleDateFormat format){
