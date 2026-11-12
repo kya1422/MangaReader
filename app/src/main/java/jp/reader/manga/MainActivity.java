@@ -119,7 +119,7 @@ public class MainActivity extends Activity {
     list.addView(text("新着・未読（1か月）",21));
     LinearLayout arrivalHeader=new LinearLayout(this);TextView arrivalStatus=text("新着を確認中…",13);arrivalHeader.addView(arrivalStatus,new LinearLayout.LayoutParams(0,-2,1));arrivalHeader.addView(button("更新",()->{arrivalsCache=null;home();}));list.addView(arrivalHeader);
     LinearLayout arrivalList=new LinearLayout(this);arrivalList.setOrientation(LinearLayout.VERTICAL);list.addView(arrivalList);
-    startNewArrivals(arrivalStatus,arrivalList);
+    startNewArrivals(arrivalStatus,arrivalList,new ArrivalViewState());
     JSONObject all=records();ArrayList<JSONObject> recent=new ArrayList<>();Iterator<String> keys=all.keys();while(keys.hasNext()){JSONObject o=all.optJSONObject(keys.next());if(o!=null&&!o.optBoolean("finished")&&!hiddenRecord(o))recent.add(o);}recent.sort((a,b)->Long.compare(b.optLong("time"),a.optLong("time")));
     list.addView(text("最近読んだ本",21));if(recent.isEmpty())list.addView(text("読みかけの本はありません",14));for(JSONObject o:recent){String name=o.optString("name"),url=o.optString("url"),fu=o.optString("folder"),fn=o.optString("folderName");TextView v=entry(clean(name),author(name)+"  途中 "+(o.optInt("page")+1)+" / "+o.optInt("total"));list.addView(v);v.setOnClickListener(w->openBook(url,name,fu,fn));}
     list.addView(text("読みかけのシリーズ",21));HashSet<String> seen=new HashSet<>();ArrayList<JSONObject> series=new ArrayList<>();for(JSONObject o:recent)if(seen.add(o.optString("folder")))series.add(o);
@@ -127,29 +127,56 @@ public class MainActivity extends Activity {
     list.addView(button("並び替え: "+sort,()->new AlertDialog.Builder(this).setTitle("並び替え").setItems(new String[]{"最近読んだ順","タイトル順","著者順"},(d,n)->{prefs.edit().putString("sort",new String[]{"最近読んだ順","タイトル順","著者順"}[n]).apply();home();}).show()));
     for(JSONObject o:series){String fn=o.optString("folderName"),fu=o.optString("folder"),bn=o.optString("name");TextView v=entry(clean(fn),author(fn)+"\n"+clean(bn)+"  途中 "+(o.optInt("page")+1)+" / "+o.optInt("total"));list.addView(v);v.setOnClickListener(w->browse(fu,fn));}
   }
-  void displayNewArrivals(TextView status,LinearLayout list,NewArrivals.Result result,long now,long cutoff){
+  static final class ArrivalViewState {int folderPage,bookPage;String expandedFolder;}
+  void addArrivalRow(LinearLayout list,NewArrivals.Book book,java.text.SimpleDateFormat format){
+    TextView row=entry(clean(book.name),clean(book.folderName)+"  作成日 "+format.format(new java.util.Date(book.date)));list.addView(row);
+    row.setOnClickListener(v->openBook(book.url,book.name,book.folder,book.folderName));
+  }
+  void displayNewArrivals(TextView status,LinearLayout list,NewArrivals.Result result,long now,long cutoff,ArrivalViewState state,boolean cached){
     ArrayList<NewArrivals.Book> visible=new ArrayList<>();HiddenFolders.Index hidden=new HiddenFolders.Index(hiddenFolders());JSONObject all=records();
     for(NewArrivals.Book book:result.books)if(book.date>=cutoff&&book.date<=now&&!all.has(book.url)&&!hidden.hidden(book.url))visible.add(book);
+    boolean grouped=ArrivalGroups.grouped(visible.size());
     String label=(result.complete?(result.errors>0||result.limited?"一部取得できません":"取得完了"):"途中結果")+"："+visible.size()+"冊 / "+result.scanned+"フォルダ";
-    if(visible.size()>100)label+="（新しい順に100冊表示）";
+    if(grouped)label+="（フォルダ別）";
     if(result.errors>0)label+="・取得失敗 "+result.errors+"フォルダ";
     if(result.unknown>0)label+="・作成日不明 "+result.unknown+"冊（対象外）";
-    if(result.limited)label+="・探索または表示の上限に到達（一部のみ）";
+    if(result.limited)label+="・探索または候補の上限に到達（一部のみ）";
+    if(cached)label+="（前回の結果・更新で再取得）";
     status.setText(label);list.removeAllViews();
     if(result.complete&&visible.isEmpty())list.addView(text(result.errors>0||result.limited?"一部を取得できていないため、結果は不完全です":"対象の未読本はありません",14));
     java.text.SimpleDateFormat format=new java.text.SimpleDateFormat("yyyy/MM/dd",java.util.Locale.JAPAN);
-    int shown=0;for(NewArrivals.Book book:visible){
-      if(shown++>=100)break;
-      TextView row=entry(clean(book.name),clean(book.folderName)+"  作成日 "+format.format(new java.util.Date(book.date)));list.addView(row);
-      row.setOnClickListener(v->openBook(book.url,book.name,book.folder,book.folderName));
+    if(!grouped){for(NewArrivals.Book book:visible)addArrivalRow(list,book,format);return;}
+    List<ArrivalGroups.Group> groups=ArrivalGroups.group(visible);
+    state.folderPage=ArrivalGroups.clampPage(state.folderPage,groups.size());
+    if(ArrivalGroups.pages(groups.size())>1){
+      LinearLayout navigation=new LinearLayout(this);
+      if(state.folderPage>0)navigation.addView(button("← 前のフォルダ",()->{state.folderPage--;state.expandedFolder=null;state.bookPage=0;displayNewArrivals(status,list,result,now,cutoff,state,cached);}));
+      navigation.addView(text("フォルダ "+(state.folderPage+1)+" / "+ArrivalGroups.pages(groups.size()),13));
+      if(state.folderPage+1<ArrivalGroups.pages(groups.size()))navigation.addView(button("次のフォルダ →",()->{state.folderPage++;state.expandedFolder=null;state.bookPage=0;displayNewArrivals(status,list,result,now,cutoff,state,cached);}));
+      list.addView(navigation);
+    }
+    for(int index=ArrivalGroups.start(state.folderPage);index<ArrivalGroups.end(state.folderPage,groups.size());index++){
+      ArrivalGroups.Group group=groups.get(index);boolean expanded=group.folder.equals(state.expandedFolder);
+      TextView folder=entry((expanded?"▼ ":"▶ ")+clean(group.name),"新着 "+group.books.size()+"冊・タップで開閉\n"+hiddenPath(group.folder));list.addView(folder);
+      folder.setOnClickListener(v->{state.expandedFolder=expanded?null:group.folder;state.bookPage=0;displayNewArrivals(status,list,result,now,cutoff,state,cached);});
+      if(!expanded)continue;
+      state.bookPage=ArrivalGroups.clampPage(state.bookPage,group.books.size());
+      for(int i=ArrivalGroups.start(state.bookPage);i<ArrivalGroups.end(state.bookPage,group.books.size());i++)addArrivalRow(list,group.books.get(i),format);
+      if(ArrivalGroups.pages(group.books.size())>1){
+        LinearLayout navigation=new LinearLayout(this);
+        if(state.bookPage>0)navigation.addView(button("← 前の本",()->{state.bookPage--;displayNewArrivals(status,list,result,now,cutoff,state,cached);}));
+        navigation.addView(text("本 "+(state.bookPage+1)+" / "+ArrivalGroups.pages(group.books.size()),13));
+        if(state.bookPage+1<ArrivalGroups.pages(group.books.size()))navigation.addView(button("次の本 →",()->{state.bookPage++;displayNewArrivals(status,list,result,now,cutoff,state,cached);}));
+        list.addView(navigation);
+      }
     }
   }
-  void startNewArrivals(TextView status,LinearLayout list){
+  void startNewArrivals(TextView status,LinearLayout list,ArrivalViewState state){
     final String rootUrl=prefs.getString("url","");if(rootUrl.isEmpty()){status.setText("接続設定後に新着を確認できます");return;}
     final int serial=generation;Set<String> hidden=hiddenFolders();
     final long now=System.currentTimeMillis(),cutoff=java.time.Instant.ofEpochMilli(now).atZone(java.time.ZoneId.systemDefault()).minusMonths(1).toInstant().toEpochMilli();
     if(ArrivalCachePolicy.cacheable(arrivalsCache)&&rootUrl.equals(arrivalsCacheRoot)&&hidden.equals(arrivalsCacheHidden)&&ArrivalCachePolicy.fresh(arrivalsCache,arrivalsCacheTime,android.os.SystemClock.elapsedRealtime())){
-      displayNewArrivals(status,list,arrivalsCache,now,cutoff);status.append("（前回の結果・更新で再取得）");return;
+      displayNewArrivals(status,list,arrivalsCache,now,cutoff,state,true);return;
     }
     Set<String> read=new HashSet<>();Iterator<String> keys=records().keys();while(keys.hasNext())read.add(keys.next());
     arrivalsJob=arrivalsWorker.submit(()->{
@@ -162,7 +189,7 @@ public class MainActivity extends Activity {
           if(serial!=generation||!"home".equals(screen))return;
           if(ArrivalCachePolicy.cacheable(result)){arrivalsCache=result;arrivalsCacheRoot=rootUrl;arrivalsCacheHidden=new HashSet<>(hidden);arrivalsCacheTime=android.os.SystemClock.elapsedRealtime();}
           long current=System.currentTimeMillis();long currentCutoff=java.time.Instant.ofEpochMilli(current).atZone(java.time.ZoneId.systemDefault()).minusMonths(1).toInstant().toEpochMilli();
-          displayNewArrivals(status,list,result,current,currentCutoff);
+          displayNewArrivals(status,list,result,current,currentCutoff,state,false);
         }));}finally{synchronized(arrivalsLock){if(arrivalsClient==client)arrivalsClient=null;}}}
       }catch(Exception e){ui.post(()->{if(serial==generation&&"home".equals(screen))status.setText("新着を取得できません: "+(e.getMessage()==null?"不明なエラー":e.getMessage()));});}
     });

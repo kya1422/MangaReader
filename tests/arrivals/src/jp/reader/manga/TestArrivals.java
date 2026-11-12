@@ -7,6 +7,16 @@ class TestArrivals {
   long now=Instant.parse("2026-11-08T00:00:00Z").toEpochMilli(),cutoff=Instant.parse("2026-10-08T00:00:00Z").toEpochMilli();
   long valid=Instant.parse("2026-10-20T00:00:00Z").toEpochMilli(),valid2=Instant.parse("2026-11-03T00:00:00Z").toEpochMilli();
   check(NewArrivals.parseCreation("2026-11-03T09:00:00+09:00")==valid2,"creation date offset parsed");
+  check(!ArrivalGroups.grouped(0)&&!ArrivalGroups.grouped(9)&&ArrivalGroups.grouped(10),"group only when ten or more visible books");
+  List<NewArrivals.Book> groupingBooks=new ArrayList<>();
+  for(int i=0;i<205;i++){String parent=i%2==0?"https://example.com/a/":"https://example.com/b/";groupingBooks.add(new NewArrivals.Book(file(parent+i+".zip",valid2-i),parent,"same folder name"));}
+  List<ArrivalGroups.Group> groups=ArrivalGroups.group(groupingBooks);
+  check(groups.size()==2&&groups.get(0).folder.endsWith("/a/")&&groups.get(1).folder.endsWith("/b/")&&groups.get(0).books.size()==103&&groups.get(1).books.size()==102,"group by full parent URL, not displayed name");
+  check(groups.get(0).books.get(0).url.endsWith("0.zip")&&groups.get(0).books.get(1).url.endsWith("2.zip"),"preserve newest-first group and book order");
+  check(ArrivalGroups.pages(0)==1&&ArrivalGroups.pages(100)==1&&ArrivalGroups.pages(101)==2&&ArrivalGroups.start(1)==100&&ArrivalGroups.end(1,103)==103&&ArrivalGroups.clampPage(99,103)==1,"bounded folder and book pagination");
+  List<NewArrivals.Book> manyFolders=new ArrayList<>();for(int i=0;i<101;i++){String parent="https://example.com/f"+i+"/";manyFolders.add(new NewArrivals.Book(file(parent+"x.zip",valid2-i),parent,"folder"));}
+  List<ArrivalGroups.Group> groupedFolders=ArrivalGroups.group(manyFolders);
+  check(groupedFolders.size()==101&&ArrivalGroups.end(0,groupedFolders.size())==100&&ArrivalGroups.end(1,groupedFolders.size())==101&&groupedFolders.get(100).folder.endsWith("f100/"),"folder pagination exposes entries beyond first hundred");
   check(NewArrivals.parseCreation(null)==0&&NewArrivals.parseCreation("invalid")==0,"missing and invalid dates do not fall back");
   String root="https://example.com/books/",sub=root+"series/",hidden=root+"hidden/",error=root+"unreadable/";
   Map<String,List<Dav.Item>> folders=new HashMap<>();folders.put(root,Arrays.asList(new Dav.Item(sub,"series",true),new Dav.Item(hidden,"hidden",true),new Dav.Item(error,"unreadable",true),file(root+"missing.zip",0),file(root+"old.zip",cutoff-1),file(root+"future.zip",now+1),file(root+"boundary.zip",cutoff),file(root+"already.zip",valid2),file("https://evil.invalid/not-child.zip",valid2)));
