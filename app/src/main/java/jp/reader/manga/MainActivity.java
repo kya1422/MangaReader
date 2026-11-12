@@ -127,7 +127,7 @@ public class MainActivity extends Activity {
     list.addView(button("並び替え: "+sort,()->new AlertDialog.Builder(this).setTitle("並び替え").setItems(new String[]{"最近読んだ順","タイトル順","著者順"},(d,n)->{prefs.edit().putString("sort",new String[]{"最近読んだ順","タイトル順","著者順"}[n]).apply();home();}).show()));
     for(JSONObject o:series){String fn=o.optString("folderName"),fu=o.optString("folder"),bn=o.optString("name");TextView v=entry(clean(fn),author(fn)+"\n"+clean(bn)+"  途中 "+(o.optInt("page")+1)+" / "+o.optInt("total"));list.addView(v);v.setOnClickListener(w->browse(fu,fn));}
   }
-  static final class ArrivalViewState {int folderPage,bookPage;String expandedFolder;}
+  static final class ArrivalViewState {int page;final ArrayList<String> path=new ArrayList<>();}
   void addArrivalRow(LinearLayout list,NewArrivals.Book book,java.text.SimpleDateFormat format){
     TextView row=entry(clean(book.name),clean(book.folderName)+"  作成日 "+format.format(new java.util.Date(book.date)));list.addView(row);
     row.setOnClickListener(v->openBook(book.url,book.name,book.folder,book.folderName));
@@ -146,29 +146,26 @@ public class MainActivity extends Activity {
     if(result.complete&&visible.isEmpty())list.addView(text(result.errors>0||result.limited?"一部を取得できていないため、結果は不完全です":"対象の未読本はありません",14));
     java.text.SimpleDateFormat format=new java.text.SimpleDateFormat("yyyy/MM/dd",java.util.Locale.JAPAN);
     if(!grouped){for(NewArrivals.Book book:visible)addArrivalRow(list,book,format);return;}
-    List<ArrivalGroups.Group> groups=ArrivalGroups.group(visible);
-    state.folderPage=ArrivalGroups.clampPage(state.folderPage,groups.size());
-    if(ArrivalGroups.pages(groups.size())>1){
+    ArrivalGroups.Node tree=ArrivalGroups.tree(visible,prefs.getString("url","")),node=tree;
+    int valid=0;for(String folder:state.path){ArrivalGroups.Node child=node.children.get(folder);if(child==null)break;node=child;valid++;}
+    while(state.path.size()>valid)state.path.remove(state.path.size()-1);
+    final ArrivalGroups.Node selected=node;
+    if(!state.path.isEmpty())list.addView(button("← 上のフォルダ",()->{state.path.remove(state.path.size()-1);state.page=0;displayNewArrivals(status,list,result,now,cutoff,state,cached);}));
+    if(node!=tree)list.addView(text("新着："+clean(node.name)+"（"+node.count+"冊）",16));
+    ArrayList<ArrivalGroups.Node> children=new ArrayList<>(node.children.values());int count=children.size()+node.books.size();
+    state.page=ArrivalGroups.clampPage(state.page,count);
+    if(ArrivalGroups.pages(count)>1){
       LinearLayout navigation=new LinearLayout(this);
-      if(state.folderPage>0)navigation.addView(button("← 前のフォルダ",()->{state.folderPage--;state.expandedFolder=null;state.bookPage=0;displayNewArrivals(status,list,result,now,cutoff,state,cached);}));
-      navigation.addView(text("フォルダ "+(state.folderPage+1)+" / "+ArrivalGroups.pages(groups.size()),13));
-      if(state.folderPage+1<ArrivalGroups.pages(groups.size()))navigation.addView(button("次のフォルダ →",()->{state.folderPage++;state.expandedFolder=null;state.bookPage=0;displayNewArrivals(status,list,result,now,cutoff,state,cached);}));
+      if(state.page>0)navigation.addView(button("← 前へ",()->{state.page--;displayNewArrivals(status,list,result,now,cutoff,state,cached);}));
+      navigation.addView(text((state.page+1)+" / "+ArrivalGroups.pages(count),13));
+      if(state.page+1<ArrivalGroups.pages(count))navigation.addView(button("次へ →",()->{state.page++;displayNewArrivals(status,list,result,now,cutoff,state,cached);}));
       list.addView(navigation);
     }
-    for(int index=ArrivalGroups.start(state.folderPage);index<ArrivalGroups.end(state.folderPage,groups.size());index++){
-      ArrivalGroups.Group group=groups.get(index);boolean expanded=group.folder.equals(state.expandedFolder);
-      TextView folder=entry((expanded?"▼ ":"▶ ")+clean(group.name),"新着 "+group.books.size()+"冊・タップで開閉\n"+hiddenPath(group.folder));list.addView(folder);
-      folder.setOnClickListener(v->{state.expandedFolder=expanded?null:group.folder;state.bookPage=0;displayNewArrivals(status,list,result,now,cutoff,state,cached);});
-      if(!expanded)continue;
-      state.bookPage=ArrivalGroups.clampPage(state.bookPage,group.books.size());
-      for(int i=ArrivalGroups.start(state.bookPage);i<ArrivalGroups.end(state.bookPage,group.books.size());i++)addArrivalRow(list,group.books.get(i),format);
-      if(ArrivalGroups.pages(group.books.size())>1){
-        LinearLayout navigation=new LinearLayout(this);
-        if(state.bookPage>0)navigation.addView(button("← 前の本",()->{state.bookPage--;displayNewArrivals(status,list,result,now,cutoff,state,cached);}));
-        navigation.addView(text("本 "+(state.bookPage+1)+" / "+ArrivalGroups.pages(group.books.size()),13));
-        if(state.bookPage+1<ArrivalGroups.pages(group.books.size()))navigation.addView(button("次の本 →",()->{state.bookPage++;displayNewArrivals(status,list,result,now,cutoff,state,cached);}));
-        list.addView(navigation);
-      }
+    for(int i=ArrivalGroups.start(state.page);i<ArrivalGroups.end(state.page,count);i++){
+      if(i<children.size()){
+        ArrivalGroups.Node child=children.get(i);TextView folder=entry("▶ "+clean(child.name),"新着 "+child.count+"冊・タップして表示");list.addView(folder);
+        folder.setOnClickListener(v->{state.path.add(child.folder);state.page=0;displayNewArrivals(status,list,result,now,cutoff,state,cached);});
+      }else addArrivalRow(list,selected.books.get(i-children.size()),format);
     }
   }
   void startNewArrivals(TextView status,LinearLayout list,ArrivalViewState state){

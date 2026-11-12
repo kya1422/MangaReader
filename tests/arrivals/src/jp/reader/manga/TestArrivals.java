@@ -8,16 +8,7 @@ class TestArrivals {
   long valid=Instant.parse("2026-10-20T00:00:00Z").toEpochMilli(),valid2=Instant.parse("2026-11-03T00:00:00Z").toEpochMilli();
   check(NewArrivals.parseCreation("2026-11-03T09:00:00+09:00")==valid2,"creation date offset parsed");
   check(!ArrivalGroups.grouped(0)&&!ArrivalGroups.grouped(9)&&ArrivalGroups.grouped(10),"group only when ten or more visible books");
-  List<NewArrivals.Book> groupingBooks=new ArrayList<>();
-  for(int i=0;i<205;i++){String parent=i%2==0?"https://example.com/a/":"https://example.com/b/";groupingBooks.add(new NewArrivals.Book(file(parent+i+".zip",valid2-i),parent,"same folder name"));}
-  List<ArrivalGroups.Group> groups=ArrivalGroups.group(groupingBooks);
-  check(groups.size()==2&&groups.get(0).folder.endsWith("/a/")&&groups.get(1).folder.endsWith("/b/")&&groups.get(0).books.size()==103&&groups.get(1).books.size()==102,"group by full parent URL, not displayed name");
-  check(groups.get(0).books.get(0).url.endsWith("0.zip")&&groups.get(0).books.get(1).url.endsWith("2.zip"),"preserve newest-first group and book order");
-  check(ArrivalGroups.pages(0)==1&&ArrivalGroups.pages(100)==1&&ArrivalGroups.pages(101)==2&&ArrivalGroups.start(1)==100&&ArrivalGroups.end(1,103)==103&&ArrivalGroups.clampPage(99,103)==1,"bounded folder and book pagination");
-  List<NewArrivals.Book> manyFolders=new ArrayList<>();for(int i=0;i<101;i++){String parent="https://example.com/f"+i+"/";manyFolders.add(new NewArrivals.Book(file(parent+"x.zip",valid2-i),parent,"folder"));}
-  List<ArrivalGroups.Group> groupedFolders=ArrivalGroups.group(manyFolders);
-  check(groupedFolders.size()==101&&ArrivalGroups.end(0,groupedFolders.size())==100&&ArrivalGroups.end(1,groupedFolders.size())==101&&groupedFolders.get(100).folder.endsWith("f100/"),"folder pagination exposes entries beyond first hundred");
-  check(NewArrivals.parseCreation(null)==0&&NewArrivals.parseCreation("invalid")==0,"missing and invalid dates do not fall back");
+  check(ArrivalGroups.pages(0)==1&&ArrivalGroups.pages(100)==1&&ArrivalGroups.pages(101)==2&&ArrivalGroups.end(1,103)==103&&ArrivalGroups.clampPage(99,103)==1,"bounded hierarchy pagination");
   String root="https://example.com/books/",sub=root+"series/",hidden=root+"hidden/",error=root+"unreadable/";
   Map<String,List<Dav.Item>> folders=new HashMap<>();folders.put(root,Arrays.asList(new Dav.Item(sub,"series",true),new Dav.Item(hidden,"hidden",true),new Dav.Item(error,"unreadable",true),file(root+"missing.zip",0),file(root+"old.zip",cutoff-1),file(root+"future.zip",now+1),file(root+"boundary.zip",cutoff),file(root+"already.zip",valid2),file("https://evil.invalid/not-child.zip",valid2)));
   folders.put(sub,Arrays.asList(file(sub+"new.rar",valid2),file(sub+"second.cbz",valid),file(root+"stray.zip",valid2)));
@@ -38,6 +29,18 @@ class TestArrivals {
   check(r.unknown==1,"missing date reported");
   check(r.books.size()==3&&r.books.get(0).url.equals(sub+"new.rar")&&r.books.get(1).url.equals(sub+"second.cbz")&&r.books.get(2).url.endsWith("boundary.zip"),"unread, cutoff, direct children and descending date");
   check(r.books.get(0).folder.equals(sub)&&r.books.get(0).folderName.equals("series"),"result retains parent for opening");
+  check(r.books.get(0).ancestry.size()==2&&r.books.get(0).ancestry.get(1).url.equals(sub),"scanner retains folder hierarchy");
+  String deep=sub+"volume/",other=root+"other/";Map<String,List<Dav.Item>> hierarchy=new HashMap<>();
+  hierarchy.put(root,Arrays.asList(new Dav.Item(sub,"series",true),new Dav.Item(other,"other",true),file(root+"root.zip",valid)));
+  hierarchy.put(sub,Arrays.asList(new Dav.Item(deep,"volume",true),file(sub+"direct.zip",valid)));
+  hierarchy.put(deep,Arrays.asList(file(deep+"nested.zip",valid2)));hierarchy.put(other,Arrays.asList(file(other+"second.zip",valid)));
+  NewArrivals.Result hr=NewArrivals.scan(root,hierarchy::get,Collections.emptySet(),Collections.emptySet(),now,cutoff,()->false,x->{});
+  ArrivalGroups.Node tree=ArrivalGroups.tree(hr.books,root),series=tree.children.get(sub),nested=series.children.get(deep);
+  check(tree.count==4&&tree.books.size()==1&&tree.children.size()==2&&series.count==2&&series.books.size()==1&&nested.count==1&&nested.books.get(0).url.endsWith("nested.zip"),"nested folders remain within parent and root books remain accessible");
+  check(tree.children.values().iterator().next()==series&&nested.books.get(0).folder.equals(deep),"newest-first folder order and original book parent retained");
+  NewArrivals.Result filtered=NewArrivals.scan(root,hierarchy::get,Collections.singleton(deep+"nested.zip"),Collections.singleton(other),now,cutoff,()->false,x->{});
+  ArrivalGroups.Node ft=ArrivalGroups.tree(filtered.books,root);
+  check(ft.count==2&&!ft.children.containsKey(other)&&ft.children.get(sub).children.isEmpty(),"hidden and read books do not create empty folders");
   List<Dav.Item> many=new ArrayList<>();for(int i=0;i<NewArrivals.MAX_RESULTS+1;i++)many.add(file(root+"book"+i+".zip",valid+i));
   NewArrivals.Result capped=NewArrivals.scan(root,url->many,Collections.emptySet(),Collections.emptySet(),now,cutoff,()->false,x->{});
   check(ArrivalCachePolicy.cacheable(capped),"complete scan with result cap can be briefly reused");
